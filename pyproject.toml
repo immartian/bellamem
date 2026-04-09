@@ -1,0 +1,63 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bellamem"
+version = "0.0.1"
+description = "Local accumulating memory for LLM coding agents. Not RAG, not /compact — a belief tree that grows with mass, enforces its own constitution, and loads decisive context by importance not recency."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+authors = [
+    { name = "bellamem contributors" },
+]
+keywords = [
+    "llm",
+    "agent",
+    "memory",
+    "context",
+    "bella",
+    "rag",
+    "constitution",
+    "claude-code",
+    "cursor",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Text Processing :: Linguistic",
+    "Typing :: Typed",
+]
+dependencies = []
+
+[project.optional-dependencies]
+st = ["sentence-transformers>=2.2"]
+openai = ["openai>=1.0"]
+all = ["sentence-transformers>=2.2", "openai>=1.0"]
+test = ["pytest>=7.0"]
+
+[project.urls]
+Homepage = "https://github.com/immartian/bellamem"
+Repository = "https://github.com/immartian/bellamem"
+Issues = "https://github.com/immartian/bellamem/issues"
+Changelog = "https://github.com/immartian/bellamem/blob/main/CHANGELOG.md"
+Architecture = "https://github.com/immartian/bellamem/blob/main/ARCHITECTURE.md"
+
+[project.scripts]
+bellamem = "bellamem.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["bellamem*"]
+
+[tool.setuptools.package-data]
+bellamem = ["principles/*.md"]

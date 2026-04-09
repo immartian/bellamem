@@ -1,0 +1,53 @@
+# Secrets — NEVER commit
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtualenvs
+.venv/
+venv/
+env/
+ENV/
+
+# Packaging / build
+build/
+dist/
+*.egg-info/
+*.egg
+.eggs/
+pip-wheel-metadata/
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Tests / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.mypy_cache/
+.ruff_cache/
+
+# bellamem runtime state (lives in ~/.bellamem by default, but in case
+# a user points BELLAMEM_SNAPSHOT at the repo, keep these out)
+data/
+snapshots/
+*.snapshot.json
+embed_cache.json
+llm_ew_cache.json
+
+# Claude Code session transcripts (if ever materialised inside the repo)
+*.jsonl
