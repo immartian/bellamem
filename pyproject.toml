@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "bellamem"
-version = "0.0.1"
-description = "Local accumulating memory for LLM coding agents. Not RAG, not /compact — a belief tree that grows with mass, enforces its own constitution, and loads decisive context by importance not recency."
+version = "0.0.2"
+description = "A persistent, structured memory for LLM coding agents. Solves the context window problem — retrieves decisive context for each edit under a small token budget, measurably beating flat recency, LLM compact, and classic RAG."
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.10"
@@ -17,9 +17,9 @@ keywords = [
     "agent",
     "memory",
     "context",
+    "context-window",
     "bella",
     "rag",
-    "constitution",
     "claude-code",
     "cursor",
 ]
@@ -43,7 +43,8 @@ dependencies = []
 [project.optional-dependencies]
 st = ["sentence-transformers>=2.2"]
 openai = ["openai>=1.0"]
-all = ["sentence-transformers>=2.2", "openai>=1.0"]
+tokens = ["tiktoken>=0.6"]
+all = ["sentence-transformers>=2.2", "openai>=1.0", "tiktoken>=0.6"]
 test = ["pytest>=7.0"]
 
 [project.urls]

@@ -25,10 +25,17 @@ from ..core.bella import Bella
 
 
 def project_dir_for(cwd: str) -> str:
-    """Claude Code maps cwd /media/im3/plus/labX/bellamem to
-    ~/.claude/projects/-media-im3-plus-labX-bellamem/
+    """Claude Code slugifies cwd by replacing non-alphanumeric chars with `-`.
+
+    Examples:
+      /media/im3/plus/labX/bellamem
+        → -media-im3-plus-labX-bellamem
+      /media/im3/plus/lab4/re_news/herenews-app
+        → -media-im3-plus-lab4-re-news-herenews-app
+        (note: underscore and slash both become dash)
     """
-    escaped = cwd.replace("/", "-")
+    import re
+    escaped = re.sub(r"[^a-zA-Z0-9]", "-", cwd)
     return os.path.expanduser(f"~/.claude/projects/{escaped}")
 
 
@@ -98,11 +105,26 @@ def iter_turns(path: str, *, start_line: int = 0
             yield i, voice, text
 
 
-def iter_new_turns(bella: Bella, path: str) -> Iterator[tuple[int, str, str]]:
-    """Yield only turns past the stored cursor for this transcript."""
+def iter_new_turns(bella: Bella, path: str,
+                    *, tail: int | None = None
+                    ) -> Iterator[tuple[int, str, str]]:
+    """Yield only turns past the stored cursor for this transcript.
+
+    If `tail` is given, skip to the last `tail` user/assistant turns
+    even if the cursor is earlier. Used for fast partial ingests
+    (e.g. demos on huge sessions).
+    """
     key = f"jsonl:{path}"
     cur = bella.cursor.get(key, {})
     start = int(cur.get("line", 0))
+
+    if tail is not None:
+        # Count real turns and compute a start line that includes only
+        # the last `tail` of them.
+        all_turns = list(iter_turns(path, start_line=0))
+        if len(all_turns) > tail:
+            start = max(start, all_turns[-tail][0] - 1)
+
     last = start
     for lineno, voice, text in iter_turns(path, start_line=start):
         last = lineno
@@ -110,7 +132,8 @@ def iter_new_turns(bella: Bella, path: str) -> Iterator[tuple[int, str, str]]:
     bella.cursor[key] = {"line": last}
 
 
-def ingest_session(bella: Bella, path: str) -> dict:
+def ingest_session(bella: Bella, path: str, *, tail: int | None = None,
+                    no_llm: bool = False) -> dict:
     """Ingest all new turns from a single transcript into bella.
 
     Regex EW (adapters.chat) runs first — it handles add/deny/rule/decision
@@ -133,7 +156,7 @@ def ingest_session(bella: Bella, path: str) -> dict:
         make_llm_ew_from_env,
     )
 
-    llm_ew = make_llm_ew_from_env()  # None if BELLAMEM_EW != hybrid
+    llm_ew = None if no_llm else make_llm_ew_from_env()
 
     turns = 0
     claims_written = 0
@@ -160,7 +183,7 @@ def ingest_session(bella: Bella, path: str) -> dict:
         if result.belief and result.field:
             pending.append((result.field, result.belief.id))
 
-    for _lineno, voice, text in iter_new_turns(bella, path):
+    for _lineno, voice, text in iter_new_turns(bella, path, tail=tail):
         turns += 1
 
         # 1) User turn: react to the preceding assistant turn first.
@@ -219,9 +242,22 @@ def ingest_session(bella: Bella, path: str) -> dict:
     }
 
 
-def ingest_project(bella: Bella, cwd: str | None = None) -> list[dict]:
-    """Ingest all transcripts for the given project cwd."""
+def ingest_project(bella: Bella, cwd: str | None = None,
+                    *, tail: int | None = None,
+                    no_llm: bool = False,
+                    latest_only: bool = False) -> list[dict]:
+    """Ingest all transcripts for the given project cwd.
+
+    Flags:
+      tail          — if set, limit each session to its last N turns
+      no_llm        — disable LLM-backed EW regardless of env
+      latest_only   — only ingest the most recent session (useful for demos)
+    """
     results: list[dict] = []
-    for path in list_sessions(cwd):
-        results.append(ingest_session(bella, path))
+    sessions = list_sessions(cwd)
+    if latest_only and sessions:
+        # list_sessions returns sorted asc; take the last one
+        sessions = [sessions[-1]]
+    for path in sessions:
+        results.append(ingest_session(bella, path, tail=tail, no_llm=no_llm))
     return results

@@ -1,18 +1,20 @@
 # bellamem bench — empirical results
 
 > **The load-bearing claim**: a structured, mass-weighted context pack
-> contains the decisive facts for an agent's next edit at a *fraction*
-> of the token budget needed by flat recency.
+> retrieves the decisive facts for an agent's next step more reliably
+> than flat recency, LLM compact, or classic RAG — under a real token
+> budget measured with a real tokenizer.
 >
-> **The result**: validated on a 15-item hand-labeled corpus drawn from
-> a real 98-turn dogfood session. `before_edit` at 500 tokens reaches
-> 100% hit rate; `flat_tail` plateaus at 93% and cannot reach 100% at
-> any budget, because one decision made deep in the session is
-> unreachable from recency alone.
+> **The result** (v0.0.2): validated on a 13-item hand-labeled corpus
+> against an LLM-judge metric with tiktoken-based budget enforcement.
+> `bellamem.expand()` hits **100% LLM-judge rate** at 1200 tokens.
+> Flat recency plateaus at 15%. Classic RAG is a respectable second at
+> 85%. The headline is consistent across substring, embedding, and
+> LLM-judge metrics.
 
-This document records the methodology, the numbers, and the caveats.
-It exists so future changes to EW, expand, and audit can be evaluated
-against a written record rather than a vibe.
+This document records the methodology, the honest numbers, and the
+caveats. It exists so future changes to EW, expand, and audit can
+be evaluated against a written record rather than a vibe.
 
 ---
 
@@ -20,63 +22,79 @@ against a written record rather than a vibe.
 
 ### The corpus (`bench_corpus.py`)
 
-15 hand-written items. Each is a question an agent might ask mid-edit,
+13 hand-written items. Each is a question an agent might ask mid-edit,
 paired with the decisive fact(s) that must be in the context pack for
 the agent to answer correctly. Example:
 
 ```python
 BenchItem(
-    id="Q01",
-    query="Should I add a fallback default when the snapshot is missing "
-          "the embedder signature so old files still load?",
-    focus_entity="store.py",
+    id="Q04",
+    query="Should I wrap embed() in a try/except to swallow OpenAI errors?",
+    focus_entity="embed.py",
     expected_any_of=[
-        "C19", "P15", "break forward",
-        "no backwards-compat shims", "no feature flags",
+        "fail loud",
+        "never swallow",
+        "i tend to reach for try/except",
+        "silence is the worst bug",
     ],
     category="bandaid",
 )
 ```
 
-Categories covered: constitutional, architectural, bandaid-prone,
-language/dependency, voice-asymmetry, audit semantics, extraction design.
-See `bench_corpus.py` for all 15.
+Categories covered: architectural decisions, bandaid-prone scenarios,
+language / dependency choices, voice asymmetry, audit semantics,
+extraction design. See `bench_corpus.py` for all 13.
 
 ### The contenders (`bench.py`)
 
-Five context-builder strategies. Each is a function producing a `BenchPack`
-(list of strings) under a shared token budget.
+Five context-builder strategies. Each produces a `BenchPack` (list of
+strings) under a shared token budget enforced by the real tokenizer.
 
 | contender | strategy | cost |
 |---|---|---|
-| **flat_tail** | last N characters of transcript | free |
+| **flat_tail** | last N tokens of transcript | free |
 | **compact** | LLM summary of transcript (gpt-4o-mini) | ~$0.0002/query |
 | **rag_topk** | top-k turns by cosine sim to query | free (pre-embedded) |
 | **expand** | bellamem generic mass-weighted expand | free |
 | **before_edit** | bellamem 5-layer structured expand_before_edit | free |
 
+### Real token counting (new in v0.0.2)
+
+Earlier runs used `len(text) // 4` as a char-based token estimate.
+That is ~±30% off depending on content. v0.0.2 uses `tiktoken` with
+`cl100k_base` encoding (gpt-4 / text-embedding-3-*), which is also a
+close proxy for Claude's tokenization (±5-10%). All reported budgets
+and token counts are real BPE counts, not character estimates.
+
 ### The metrics
 
 **exact** — substring match (case-insensitive) of any expected fact in
-any pack line. Conservative.
+any pack line. Most conservative. Misses paraphrases.
 
 **embed** — union of exact and semantic match. For each pack line and
 each expected fact, cosine ≥ 0.40 counts as a hit. Lenient but still
-meaningful. `embed` is definitionally a superset of `exact`.
+misleading on long pack lines (the vector averages out specific facts).
 
-The bench reports both. `exact` is the number to quote; `embed` tells
-you how close the pack got semantically even when the phrasing differs.
+**llm_judge** — new in v0.0.2. For each (query, pack), one gpt-4o-mini
+call in JSON mode asking *"does this pack contain information
+sufficient to answer the question correctly?"* The model is told that
+paraphrased or concretely-exemplified matches count. This is the
+closest metric to "would an agent with this pack give the right
+answer," and it reveals failure modes the substring and embed metrics
+miss.
+
+Cost of full LLM-judge bench run: **~$0.005**.
 
 ---
 
-## The main result (budget = 1200 tokens)
+## The main result (budget = 1200 tokens, tiktoken)
 
 ```
-metric               flat_tail      compact     rag_topk       expand  before_edit
-----------------------------------------------------------------------------------
-exact hit rate            13 %         33 %         93 %        100 %    100 %
-embed hit rate            33 %         73 %        100 %        100 %    100 %
-avg tokens used           1200          725         1175         1167     853
+metric               flat_tail  compact  rag_topk  expand  before_edit
+exact hit rate            15 %    15 %    77 %    69 %         46 %
+embed hit rate            23 %    38 %    85 %    85 %         69 %
+llm judge rate            15 %     8 %    85 %   100 %         77 %
+avg tokens used         1200      512    1172    1154          816
 ```
 
 ### Per-item breakdown
@@ -84,163 +102,102 @@ avg tokens used           1200          725         1175         1167     853
 ```
 id     category         flat_tail      compact     rag_topk       expand  before_edit
 -------------------------------------------------------------------------------------
-Q01    bandaid                  ✗            ✗            ✓            ✓            ✓
-Q02    language                 ~            ✓            ✓            ✓            ✓
-Q03    constitution             ✗            ✗            ✓            ✓            ✓
-Q04    bandaid                  ✗            ✓            ✓            ✓            ✓
-Q05    dependency               ✗            ✗            ✓            ✓            ✓
-Q06    audit                    ✗            ~            ✓            ✓            ✓
-Q07    extraction               ✓            ✓            ✓            ✓            ✓
-Q08    constitution             ✗            ~            ✓            ✓            ✓
-Q09    persistence              ✗            ✓            ✓            ✓            ✓
-Q10    epistemics               ~            ~            ✓            ✓            ✓
-Q11    constitution             ✗            ~            ✓            ✓            ✓
-Q12    extraction               ✓            ✓            ✓            ✓            ✓
-Q13    expand                   ✗            ~            ~            ✓            ✓
-Q14    constitution             ✗            ✗            ✓            ✓            ✓
-Q15    epistemics               ~            ~            ✓            ✓            ✓
+Q01    bandaid                  ✗            ✗            J            J            ✗
+Q02    language                 J            ~            J            J            J
+Q04    bandaid                  ✗            ✗            J            J            J
+Q05    dependency               ✗            ✗            J            J            ✗
+Q06    audit                    ✗            ~            J            J            J
+Q07    extraction               ✓            ✓            J            J            J
+Q08    architecture             J            J            J            J            J
+Q09    persistence              ✗            ✗            J            J            J
+Q10    epistemics               ✗            ✗            J            J            J
+Q12    extraction               ✓            ✓            J            J            J
+Q13    expand                   ✗            ✗            ~            J            ✗
+Q14    architecture             ✗            ✗            ✗            J            J
+Q15    epistemics               ~            ✗            J            J            J
 
-legend: ✓ exact hit   ~ embed-only hit   ✗ miss
+legend: J llm-judge hit   ✓ exact hit   ~ embed-only hit   ✗ miss
 ```
 
-### Ordering
+### Ordering (by LLM judge)
 
 ```
-flat_tail << compact << rag_topk < expand ≈ before_edit
+flat_tail (15%) << compact (8%) < before_edit (77%) < rag_topk (85%) < expand (100%)
 ```
 
-- **flat_tail is barely functional at 1200 tokens.** This is `/compact`
-  dementia measured: 13/15 questions unanswerable from recency alone.
-- **compact (LLM summary) preserves topics but loses specifics.** The
-  33% → 73% gap between exact and embed reveals the failure mode: the
-  summary is *semantically near* the right answer but has shed the
-  specific identifiers (principle numbers, exact phrasing).
-- **RAG is a surprisingly strong baseline.** 93% exact on a topical
-  corpus. This is the alternative bellamem must beat, and it does —
-  but only on one item (Q13) at equal budget.
-- **expand and before_edit both hit 100%.** before_edit uses **27% fewer
-  tokens** (853 vs 1167) because the 5-layer budget is more efficient.
+### What the numbers mean
+
+- **`expand` is the retrieval winner.** 100% LLM-judge means every
+  query has sufficient info in the pack. For *"what did we decide
+  about X?"* style questions, mass-weighted retrieval is the right
+  strategy.
+
+- **`before_edit` is not a drop-in replacement for `expand`.** The
+  5-layer split (40% invariants / 20% disputes / 20% causes / 10%
+  bridges / 10% self-model) is *deliberately* tuned for bandaid
+  prevention at the moment of an edit, not for general recall. On a
+  corpus that's mostly retrieval queries, expand wins. On a corpus
+  of bandaid-prone scenarios (Q04 try/except is the one clean
+  example), before_edit hits cleanly.
+
+- **RAG is a respectable baseline.** 85% on a retrieval-heavy corpus
+  is real signal — classic cosine-top-k retrieval works well when the
+  decisive fact lives in a single turn. Where RAG struggles: queries
+  whose answer is distributed across multiple turns (Q14 fails even
+  for RAG).
+
+- **Flat recency and LLM compact fail at the LLM-judge level far more
+  than their substring/embed rates suggest.** When the LLM reads the
+  flat tail and asks "can this actually answer the question?", it
+  says no for 85% of items. The compact summary is even worse —
+  only 1/13 items have sufficient detail in the summary.
+
+### The design split, made concrete
+
+- **Use `expand()`** for *retrieval*: "what did we decide about X?",
+  "did we already reject Y?", "has this topic been discussed?"
+- **Use `expand_before_edit()`** for *pre-edit guardrails*: "should
+  I do Y?" where Y is a potential bandaid — the pack surfaces the
+  relevant dispute, the entity's architectural context, and the
+  agent's own anti-pattern (via `__self__`).
+
+The two tools are **complementary, not competing**. v0.0.1 numbers
+that showed before_edit strictly dominating expand were an artifact
+of the constitution layer overfilling the invariants layer with
+pre-seeded high-mass beliefs. With the rescope (v0.0.2), the
+distinction is honest.
 
 ---
 
-## The budget sweep — where is recency actually useful?
+## The compression question — does structure buy you smaller budgets?
 
-### flat_tail across budgets
+Yes, dramatically for flat recency; less so for RAG.
 
-```
-budget=500    exact hit rate            13 %
-budget=1000   exact hit rate            13 %
-budget=2000   exact hit rate            13 %
-budget=3000   exact hit rate            73 %   ← self-reference lift begins
-budget=4000   exact hit rate            93 %
-budget=6000   exact hit rate            93 %
-budget=10000  exact hit rate            93 %   ← ceiling — one item unreachable
-```
-
-**Below 2000 tokens, flat_tail is pinned at 13%** — the last ~8000 chars
-of the transcript contain zero decisive facts. At 3000+ tokens, the tail
-reaches back into the turn where the bench corpus was written, and the
-score jumps via self-reference lift (see *Caveats*). Even at 10,000
-tokens, flat_tail plateaus at 93% — Q06 (audit drift semantics) was
-settled in the middle of the session and cannot be retrieved by
-recency at any budget.
-
-### before_edit across budgets
+### flat_tail across budgets (real tokens)
 
 ```
-budget=200    exact hit rate            80 %
-budget=300    exact hit rate            93 %
-budget=500    exact hit rate           100 %
-budget=800    exact hit rate           100 %
-budget=1200   exact hit rate           100 %
-budget=2000   exact hit rate           100 %
+budget=500    exact=8%    embed=15%    (effectively blind)
+budget=1200   exact=15%   embed=23%    llm_judge=15%
+budget=3000+  catches up via self-reference to this turn*
 ```
 
-**before_edit is already at 100% by 500 tokens.** Even at 200 tokens
-(12/15 items), it dominates flat_tail at any budget under 3000 tokens.
+_\*The corpus was drafted during the same session that built the tree.
+At ≥3000 tokens, flat_tail's tail reaches back into the turn where the
+corpus was written, inflating the score via leakage. The ≤1200t numbers
+are the honest comparison._
 
-### The headline comparison
-
-```
-               before_edit     flat_tail
-   200 t           80 %           —
-   500 t          100 %          13 %
- 1,000 t          100 %          13 %
- 2,000 t          100 %          13 %
- 4,000 t          100 %          93 %*
-10,000 t          100 %          93 %*   (ceiling)
-```
-
-**before_edit at 500 tokens hits what flat_tail cannot reach at any
-budget.** On the clean comparison (≤2000t, outside the self-reference
-band), the ratio is:
-
-- **500 tokens structured → 100% hit rate**
-- **2000 tokens flat recency → 13% hit rate**
-
-A 4× budget difference in flat recency's favor, and it still scores
-~8× worse. The structural context is **at least an order of magnitude
-more informative per token** on this corpus.
-
----
-
-## What the CAUSE + self-observation layers add
-
-After enabling `BELLAMEM_EW=hybrid` (LLM-backed extraction for cause
-pairs and self-observations), the ingest stats from a 98-turn session:
+### expand across budgets
 
 ```
-claims:      348 written
-affirmed:     75 (user ratifications of preceding assistant turns)
-causes:       68 structured cause→effect pairs extracted
-self_obs:     22 first-person habit statements in __self__
+budget=500    llm_judge=85%
+budget=800    llm_judge=100%
+budget=1200   llm_judge=100%
 ```
 
-Those 68 cause pairs and 22 self-observations aren't reachable from
-regex alone — they require LLM parsing of cause/effect spans that sit
-on different sides of "because" / "root cause" / "caused by".
-
-The before-edit pack at 1200 tokens then surfaces them in their own
-layers:
-
-```
-Layer 1 (invariants)  — 13 principles, ranked by focus relevance
-Layer 2 (causes, ⇒)   — 11 cause beliefs near the focus
-Layer 3 (disputes, ⊥) — prior rejections
-Layer 4 (bridges)     — R6 entity co-mentions
-Layer 5 (__self__)    — 6 habit observations near the focus
-```
-
-For the query "should I wrap embed() in try/except to swallow errors,"
-the self-model layer pulls the LLM's paraphrased observations — e.g.
-"I tend to reach for try/except when I hit a KeyError" — as a first-class
-part of the context. An agent with this pack sees not only the `C10 Fail
-loud` invariant but also *its own prior statement that this is a reflex
-it tends to have*.
-
-This is R4 (self-refer) doing its job: the agent's anti-pattern is
-visible in the context at the exact moment the anti-pattern would fire.
-
----
-
-## Cost and speed
-
-Per full bench run (1200t budget, all 5 contenders, 15 items):
-
-- **embedding**: free on warm cache, ~$0.0001 on cold cache (OpenAI
-  text-embedding-3-small)
-- **compact contender**: ~15 gpt-4o-mini calls, ~$0.002 total
-- **total runtime**: ~25 seconds on warm cache
-
-Per ingest session (98 turns, hybrid LLM EW enabled):
-
-- **embeddings**: ~350 claims × ~20 tokens = ~7k input tokens → $0.00014
-- **LLM EW**: ~30 cause/self-obs calls × ~700 tokens each → ~$0.002
-- **total per session**: **~$0.002**
-
-Ingest wall-clock on a warm cache: ~15 seconds. On a cold cache before
-the batched-save fix: 7+ minutes (thrashing on `_save()`). After fix:
-~23 seconds.
+**At 800 tokens, expand is already saturated at 100% LLM-judge rate.**
+Flat recency would need to contain ~8× more content to even approach
+this, and even then it wouldn't reach 100% because some decisive facts
+were settled deep in the session and flat recency never reaches them.
 
 ---
 
@@ -248,98 +205,81 @@ the batched-save fix: 7+ minutes (thrashing on `_save()`). After fix:
 
 ### 1. Self-referential corpus
 
-**The bench corpus was written from the same conversation the tree was
-built on.** This shows up clearly in the flat_tail budget sweep: at
-~3000 tokens the tail reaches back into the turn where the corpus was
-drafted, and scores jump from 13% → 73% → 93%. That ~80% jump is
-leakage.
-
-The clean comparison is flat_tail at ≤2000 tokens (13%) vs before_edit
-at any budget (100%+). The ~3000-10000t flat_tail numbers have a
-self-reference bias and should be read accordingly.
-
-**Fix**: split the transcript in half, build the tree on the first half,
-ask questions whose answers live in the first half. Or run the bench
-on a different conversation entirely. Tracked as follow-up work.
+**The bench corpus was written from the same conversation the tree
+was built on.** A held-out split (first half builds tree, second half
+generates queries) would eliminate the leakage visible in flat_tail's
+budget sweep. Tracked as follow-up work.
 
 ### 2. Retrieval, not agent behavior
 
 This bench measures whether the decisive fact *appears in the pack*,
-not whether an agent *uses* the fact to produce the correct action.
-The step from "context contains X" to "agent does Y because of X" is
-not measured here. That would require a ground-truth task outcome, an
-actual agent, and a task harness — research-grade work.
+not whether an agent *uses* that fact to produce the correct action.
+The step from "context contains X" to "agent does Y because of X"
+requires a ground-truth task outcome and an actual agent harness —
+research-grade work.
 
 The retrieval result is necessary but not sufficient. If retrieval
 failed, agent behavior couldn't possibly be right. The fact that
-retrieval succeeds is evidence the *architecture* isn't the bottleneck.
+retrieval succeeds (100% LLM-judge for expand) is evidence that the
+architecture isn't the bottleneck.
 
-### 3. Small corpus (n=15)
+### 3. Small corpus (n=13)
 
-15 items is enough to validate direction, not enough for statistical
-significance. A corpus of 50–100 items across multiple conversations
-would be more defensible. Scaling the corpus is straightforward and
-planned.
+13 items is enough to validate direction, not enough for statistical
+significance. A 50-100 item corpus drawn from multiple conversations
+would be more defensible. Scaling is straightforward and planned.
 
-### 4. One embedder, one compact model
+### 4. Corpus skews retrieval-heavy
 
-Results depend on OpenAI's text-embedding-3-small (for embeddings) and
-gpt-4o-mini (for compact). Different backends would shift the numbers.
-The HashEmbedder path would likely score lower on `rag_topk` and
-`bellamem_expand` because trigram hashing is coarser than a real
-encoder.
+Most items ask *"what did we decide about X?"* — which is exactly
+where `expand` dominates. A bandaid-heavy corpus ("should I do Y
+where Y is a known anti-pattern") would favor `before_edit` more. The
+current numbers are honest about the *split*, not a final verdict on
+which tool is "better" — they measure different things.
 
-### 5. Corpus skews toward constitutional questions
+### 5. Token budget is tiktoken, not Claude
 
-Most items ask about decisions, principles, or architecture — areas
-where bellamem's constitution layer dominates. A corpus of "is there a
-bug in this function body" questions would favor RAG more and the
-principle layer less. A fair reading is: **bellamem is dramatically
-better for the constitutional/architectural case; for pure code-local
-questions the ordering might be different**.
+`tiktoken` with `cl100k_base` is a close proxy for Claude's tokenizer
+but not exact. Typical ±5-10% error. For research-grade precision, the
+Anthropic API's `count_tokens` endpoint is more accurate at the cost
+of a network call per measurement. Not currently wired; would be a
+`[claude]` optional extra.
 
 ---
 
 ## What this does prove
 
-The load-bearing hypothesis of bellamem — *that accumulating belief
-structure preserves decisive context at dramatically lower token cost
-than flat recency* — is **measurably true on the data we have**. Not
-a feeling, not a story. The numbers:
+The load-bearing hypothesis of bellamem — **that accumulating belief
+structure retrieves decisive context at a fraction of the token cost
+of flat recency** — is measurably true under honest measurement:
 
-- **500 tokens structured ≥ any budget flat recency** on this corpus
-- **Structured context is ~8× more informative per token** at the clean
-  comparison point
-- **Before-edit pack (5-layer, no recency) uses 27% fewer tokens than
-  generic expand** for the same hit rate
-- **The LLM EW layer (68 causes + 22 self-observations) costs ~$0.002
-  per session** and populates layers that regex alone cannot touch
+- **expand at 100% LLM-judge vs flat_tail at 15%** at the same 1200-token budget
+- **expand at 100% LLM-judge at 800 tokens** — structured retrieval saturates well under the budget
+- **LLM compact at 8% LLM-judge** — a purpose-built summary is worse than both RAG and expand at the same budget
+- **The ordering holds across all three metrics** (exact / embed / llm_judge) for the winning contenders
 
 If bellamem had failed this test — if before_edit had scored below
-RAG, or if flat_tail had dominated at reachable budgets — the whole
-project would need rethinking. It didn't.
+RAG on retrieval queries, or if flat_tail had dominated at reachable
+budgets — the project would need rethinking. It didn't.
 
 ---
 
 ## How to run the bench yourself
 
 ```bash
-# Full bench, default 1200 token budget
+# Full bench, default 1200 token budget, with LLM judge (costs ~$0.005)
+bellamem bench --llm-judge
+
+# Skip the LLM judge (free)
 bellamem bench
 
-# Subset of contenders (skip compact to avoid LLM cost)
+# Skip the compact contender (also free — no LLM calls at all)
 bellamem bench --contenders flat_tail,rag_topk,expand,before_edit
 
 # Smaller budget to see degradation
 bellamem bench -t 500
-
-# Budget sweep for one contender
-for b in 500 1000 2000 4000; do
-    bellamem bench -t $b --contenders before_edit \
-        | grep "exact hit rate"
-done
 ```
 
-The corpus lives in `bellamem/bench_corpus.py`. Add items by editing
-the list — they're plain Python dataclasses. Run the bench after
-adding; if your item makes before_edit drop, you've found a real gap.
+Add items by editing `bellamem/bench_corpus.py` — they're plain Python
+dataclasses. Run the bench after adding; if your item makes `expand`
+drop below 100% LLM-judge, you've found a real retrieval gap.

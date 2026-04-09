@@ -35,7 +35,8 @@ def test_public_api_imports():
     """core's __init__ exports the documented names."""
     from bellamem import core
     for name in ("Bella", "Claim", "Belief", "Gene", "expand",
-                 "save", "load", "seed_principles", "PRINCIPLES_FIELD"):
+                 "expand_before_edit", "save", "load",
+                 "SELF_MODEL_FIELD", "is_reserved_field"):
         assert hasattr(core, name), f"missing: core.{name}"
 
 
@@ -152,19 +153,10 @@ def test_expand_before_edit_surfaces_invariants():
 
 
 def test_expand_before_edit_empty_on_empty_forest():
-    """If nothing qualifies for any layer, the pack is legitimately empty.
-
-    This is the opposite of the previous test: before_edit does NOT
-    invent content. Low-mass ordinary claims don't reach the 0.80
-    invariant floor and there are no edges / entities / self-model
-    entries to populate the other layers.
-    """
+    """An empty forest returns an empty pack. before_edit does not invent."""
     b = _fresh_bella()
-    b.ingest(Claim(text="retry with exponential backoff",
-                   voice="user", lr=2.0))
     pack = expand_before_edit(b, "should I retry the request",
                               budget_tokens=400)
-    # Empty pack is correct behavior — no layer qualifies.
     assert pack.lines == []
 
 

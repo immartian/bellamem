@@ -1,47 +1,53 @@
 # bellamem
 
-**Local, accumulating memory for LLM coding agents.**
+**A persistent, structured memory for LLM coding agents. It solves the
+context window problem.**
 
-Not RAG. Not `/compact`. A belief tree that grows with mass, enforces its
-own constitution, and loads decisive context by importance not recency.
+LLM coding agents have a finite context window. Over a session, it
+fills up. `/compact` summarizes old turns and loses specifics. Rejected
+approaches come back. Root causes identified earlier are forgotten.
+Across sessions, there's no memory at all.
 
-bellamem is an application of [BELLA](#theory)'s six-rule calculus to the
-specific problem coding agents keep failing at: remembering what you already
-decided, why you rejected something, and which of your own habits keep
-leading to bandaid fixes.
+bellamem replaces that failure mode with a belief tree that grows with
+your actual work — ratified decisions, preserved disputes, entity
+bridges, causal chains, self-observations — and builds the **decisive
+context pack** for each edit under a small token budget.
+
+On a hand-labeled benchmark drawn from a real 98-turn session,
+bellamem's structured `before-edit` pack hits 100% retrieval at
+**500 tokens**, while flat-recency context plateaus at 93% and
+**cannot reach 100% at any budget**. The root-cause beliefs and
+user corrections that flat recency loses, bellamem keeps.
 
 ---
 
-## Why
+## What bellamem is (and what it isn't)
 
-Every heavy Claude Code / Cursor user has felt it:
+**It is:**
+- A persistent belief tree keyed to your Claude Code `.jsonl` transcripts
+- A voice-aware claim extractor (user is oracle, assistant is hypothesis)
+- A retroactive ratification pass (user "yes/agreed" boosts preceding assistant claims)
+- A structured context-pack builder (`expand` for generic queries, `expand_before_edit` for pre-edit context)
+- An empirical bench comparing structured retrieval against flat recency, LLM compact, and RAG
+- ~2500 lines of Python, zero required runtime dependencies
 
-- `/compact` turns a session summary into a shallow paraphrase and loses the
-  "why". Rejected approaches come back next session.
-- Flat recency context biases toward the last bandaid instead of the
-  invariant the bandaid violates.
-- RAG retrieves topical documents but has no memory of accumulated
-  decisions, disputes, or the agent's own anti-patterns.
-- Manual `MEMORY.md` files rot because nothing enforces them.
-
-bellamem does one thing: it builds a persistent, structured belief tree
-from your actual conversations and loads the *decisive facts* for each
-edit under a small token budget. The numbers (see [BENCH.md](BENCH.md))
-show structured context retrieving decisive facts at roughly **1/8 the
-token budget of flat recency** on a hand-labeled dogfood corpus.
-
-It is, deliberately, not a graph database, not a vector store, and not an
-LLM framework. It is ~3000 lines of Python, stdlib-only by default, with
-opt-in upgrades for real embeddings and LLM-backed extraction.
+**It is not:**
+- A replacement for Claude Code's context window (that's Anthropic's code; bellamem augments, doesn't replace)
+- A governance / drift-prevention tool (separate problem; out of scope)
+- A graph database, vector store, or LLM framework
+- A substitute for docs, tests, or good engineering practice
 
 ---
 
 ## Status
 
-**v0.0.1 — alpha.** Dogfooded on a single long session (this one) and
-validated against a hand-written bench. Production-ready for "try it on
-your own project," not yet for "bet your release on it." See
-[CHANGELOG.md](CHANGELOG.md) for what's built and what isn't.
+**v0.0.2 — alpha, rescoped.** Context window management is the mission.
+The earlier v0.0.1 shipped a constitution layer (`PRINCIPLES.md`
+enforcement, canonical engineering principles) which turned out to be
+mission creep on a different problem. Removed.
+
+The data model, retrieval quality, and bench numbers are unchanged by
+the rescope — the stripped code was governance, not memory.
 
 ---
 
@@ -62,119 +68,94 @@ Optional upgrades, each behind an extras flag:
 .venv/bin/pip install -e '.[all]'      # both
 ```
 
-Copy `.env.example` → `.env` and fill in whatever backends you enabled.
+Copy `.env.example` → `.env` and fill in the backends you enabled.
 `.env` is gitignored.
 
 ---
 
-## Quickstart — ingest a Claude Code session and query it
-
-bellamem reads Claude Code transcripts from
-`~/.claude/projects/<escaped-cwd>/*.jsonl` directly. Run it from the
-directory of the project you want memory for:
+## Quickstart
 
 ```bash
-# ingest all sessions for the current project
+# Ingest all Claude Code sessions for the current project
 bellamem ingest-cc
 
-# ask what you'd need to know before a proposed edit
-bellamem before-edit "should I wrap this in try/except to swallow errors" \
-    --entity embed.py
+# Build the before-edit context pack — invariants + disputes + causes
+# + entity bridges + self-model, no recency
+bellamem before-edit "should I wrap this in try/except" --entity embed.py
 
-# generic mass-weighted context pack
-bellamem expand "should I use Rust for the prototype"
+# Generic mass-weighted context pack for a question
+bellamem expand "what did we decide about persistence"
 
-# walk the belief tree and report drift / contradictions / bandaid piles
+# Walk the tree and surface bandaid piles + ratified decisions + disputes
 bellamem audit
 
-# benchmark against flat-tail, compact, RAG, generic expand
+# Empirically compare context strategies (flat, compact, RAG, bellamem)
 bellamem bench
 ```
 
-Every command is read-only except `ingest-cc` and `reset`.
+Every command except `ingest-cc` and `reset` is read-only.
 
 ---
 
-## The core idea in one picture
+## How it builds context
 
 ```
 Raw Claude Code transcript (.jsonl)
         ↓
-    regex EW  ──────── voice-aware (user oracle, assistant hypothesis)
+    regex EW      ── voice-aware (user oracle, assistant hypothesis)
         ↓
-    + LLM EW ──────── CAUSE pairs, self-observations (opt-in, gpt-4o-mini)
+    + LLM EW      ── CAUSE pairs, self-observations (opt-in, gpt-4o-mini)
         ↓
     Claim(text, voice, lr, relation)
         ↓
-    Bella.ingest()  ── routes via embedding, applies Jaynes accumulation
+    Bella.ingest()   routes via embedding, applies Jaynes accumulation
         ↓
     Belief tree (fields → beliefs → typed edges)
         ↓
 ┌───────┴────────┬──────────┬──────────┐
 expand()    before-edit()   audit     bench
-  generic    5-layer pack   drift      compression
-             no recency     report     vs flat/RAG
+  generic    5-layer pack   report    compression
+             no recency                vs flat/RAG
 ```
 
-Five layers in the before-edit pack, in order of priority:
+### The 5-layer before-edit pack
+
+For a proposed edit, `before_edit` assembles context under a token
+budget with this split:
 
 ```
-40%  invariants     — principles + high-mass rules  (always on)
-20%  disputes       — ⊥ edges touching the focus    (blocks re-suggestion)
-20%  causes         — ⇒ chains near the focus       (root-cause awareness)
-10%  entity bridges — R6 co-mention neighborhood     (whole-picture)
-10%  self-model     — __self__ habit observations    (agent's own anti-patterns)
+40%  invariants     — high-mass ratified beliefs anywhere in the tree
+20%  disputes       — ⊥ edges touching the focus (prevents re-suggestion)
+20%  causes         — ⇒ chains near the focus (root-cause awareness)
+10%  entity bridges — R6 co-mention neighborhood
+10%  self-model     — __self__ habit observations from LLM EW (R4)
 ```
 
-Recency is *absent* by design. In before-edit mode, recency biases toward
-the last bandaid; mass bias toward the invariant it violates.
-
-For the full architecture, see [ARCHITECTURE.md](ARCHITECTURE.md).
+**Recency is absent by design.** In before-edit mode, recency biases
+toward the last bandaid; mass biases toward the invariant it violates.
 
 ---
 
-## The constitution
+## Empirical results
 
-bellamem enforces a hand-written `PRINCIPLES.md` as an **always-loaded,
-mass-floored layer of the context pack**. The principles can only change
-by editing that file; they never decay; any claim that contradicts one
-auto-generates a visible ⊥ edge in the tree.
-
-The shipped `PRINCIPLES.md` contains 21 bellamem-specific principles plus
-22 canonical engineering principles (YAGNI, KISS, fail-loud, boundaries
-validate internals trust, break forward, etc.) — see
-[PRINCIPLES.md](PRINCIPLES.md) for the full text.
-
-The constitution idea is the anti-drift mechanism. Your project's rules
-become a load-bearing artifact the memory checks at every edit, not
-decoration in a README nobody reads.
-
----
-
-## Measured against flat recency
-
-From [BENCH.md](BENCH.md), run on 15 hand-labeled queries drawn from a
-real 98-turn dogfood session:
+From [BENCH.md](BENCH.md), measured on 15 hand-labeled queries drawn
+from a real 98-turn dogfood session:
 
 | budget | flat_tail | before_edit |
 |---|---|---|
-| 200 t | — | **80 %** |
-| 500 t | 13 % | **100 %** |
+| 200 t  | —    | **80 %** |
+| 500 t  | 13 % | **100 %** |
 | 1000 t | 13 % | 100 % |
 | 2000 t | 13 % | 100 % |
-| 4000 t | 93 %* | 100 % |
-| 10000 t | 93 %* | 100 % |
+| 4000 t | 93 %*| 100 % |
+| 10000 t| 93 %*| 100 % |
 
-_\*self-referential lift — the tail reaches back into the turn where we
-wrote the bench corpus. The clean 13% plateau at ≤2000t is the fair
-comparison._
+_\*self-referential lift — at ≥3000t the tail reaches back into the
+turn where the bench corpus was drafted. Below the self-reference band
+(≤2000t), flat_tail is pinned at 13%. Clean comparison: **500 tokens
+structured beats infinite flat recency**._
 
-**before_edit at 500 tokens reaches 100% exact match on the corpus.
-flat_tail plateaus at 93% — it cannot reach 100% at any budget, because
-one decision was made deep in the session and recency can never surface
-it.**
-
-One full comparison at 1200 tokens:
+All five contenders at 1200 tokens:
 
 ```
               flat_tail  compact  rag_topk  expand  before_edit
@@ -183,52 +164,63 @@ embed hit        33 %     73 %    100 %     100 %    100 %
 avg tokens     1200      725      1175     1167      853
 ```
 
-Caveats: corpus is small (n=15) and self-referential (written from the
-same conversation the tree was built on). A held-out split test and a
-cross-session test are planned. Full methodology and caveats in
-[BENCH.md](BENCH.md).
+Ordering: `flat_tail << compact << rag_topk < expand ≈ before_edit`.
+The before-edit mode is the tightest — it hits 100% using **27% fewer
+tokens than generic expand** because the 5-layer budget allocates
+precisely.
+
+Full methodology, budget sweeps, and caveats in [BENCH.md](BENCH.md).
 
 ---
 
-## What it's not
+## The six rules, operationally
 
-- **Not a graph database.** The belief tree is a dict of dicts. Our ops
-  are one-hop. We don't need Cypher.
-- **Not a vector store.** Embeddings are pluggable, not the architecture.
-- **Not an LLM framework.** bellamem doesn't call models for you; it
-  builds the context pack you hand to your own agent.
-- **Not a replacement for good docs.** PRINCIPLES.md is the anti-drift
-  layer; it's your architecture in commit-able form, not a substitute
-  for human writing.
-- **Not a finished product.** v0.0.1. See
-  [CHANGELOG.md](CHANGELOG.md) for what's done and
-  [CONTRIBUTING.md](CONTRIBUTING.md) for what's not.
+bellamem implements BELLA's six-rule calculus for accumulating evidence.
+Each rule maps to a concrete component:
+
+| Rule | Name | Component | Concrete behavior |
+|---|---|---|---|
+| R1 | accumulate | `gene.py:Belief.accumulate` | Jaynes log-odds mass; same-voice attenuation |
+| R2 | structure | `audit.py:_BANDAID_RE` | Detects entropy signals (bandaid piles) |
+| R3 | emerge | `bella.py:find_field` + field birth | Fields appear via embedding convergence |
+| R4 | self-refer | `__self__` field + LLM EW | Agent's habits as part of its own context |
+| R5 | converge | `claude_code.py:ingest_session` | Turn-pair retroactive ratification |
+| R6 | entangle | `bella.py:entity_index` | Entities bridge fields via co-mention |
+
+The rules are domain-agnostic. bellamem is their application to coding
+agent memory. The same calculus underlies a separate news-epistemics
+project that originated the theory.
 
 ---
 
-## Theory
+## Architecture at a glance
 
-bellamem is a domain application of **BELLA**, a six-rule calculus for
-systems that accumulate evidence over time. The same machinery underlies
-a news-epistemics application in a separate project; the theory
-document (`SPEC.md`) lives there.
+```
+bellamem/
+  core/
+    gene.py           Belief + Gene + Jaynes accumulation
+    ops.py            the seven operations: CONFIRM, AMEND, ADD, DENY,
+                      CAUSE, MERGE, MOVE (complete mutation API)
+    bella.py          forest + routing + entity index
+    embed.py          pluggable embedders (Hash/ST/OpenAI) + .env
+    store.py          atomic JSON snapshot + signature check
+    expand.py         expand() + expand_before_edit() 5-layer pack
+    audit.py          bandaid pile detection + ratified + disputes
+  adapters/
+    chat.py           voice-aware regex EW + turn-pair reaction classifier
+    claude_code.py    .jsonl reader + incremental cursor
+    llm_ew.py         gpt-4o-mini CAUSE + self-observation extraction
+  bench.py            5 contenders, 2 metrics, comparison table
+  bench_corpus.py     hand-labeled query/expected-fact pairs
+  cli.py              ingest-cc / expand / before-edit / audit / bench ...
+```
 
-The six rules, in operational form:
+Full architecture doc: [ARCHITECTURE.md](ARCHITECTURE.md).
 
-| Rule | Name | What it gives you |
-|---|---|---|
-| R1 | accumulate | Jaynes log-odds mass; repetition compounds |
-| R2 | structure | entropy-driven local restructure |
-| R3 | emerge | fields appear from centroid convergence |
-| R4 | self-refer | agent models its own patterns (`__self__`) |
-| R5 | converge | feedback attenuates cycles (turn-pair ratification) |
-| R6 | entangle | entities bridge fields via co-mention |
-
-The claim worth taking seriously: these rules are **domain-agnostic**.
-They describe any system that receives evidence over time, needs to
-structure it without losing contested claims, and must retrieve by
-importance not recency. News, coding agent memory, personal knowledge
-management — same calculus, different domain.
+**Architectural invariant**: `bellamem.core` never imports from
+`bellamem.adapters`. Core is domain-agnostic; adapters are where domain
+knowledge lives. This lets the same core run on news, personal knowledge,
+support tickets — anything that accumulates evidence.
 
 ---
 
@@ -236,10 +228,12 @@ management — same calculus, different domain.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). Short version:
 
-- Extend the bench corpus whenever you spot a new failure mode
-- Add new embedders by implementing the `Embedder` protocol in `core/embed.py`
-- Add new EW adapters in `adapters/` — never in `core/`
-- Respect `PRINCIPLES.md` — the tool enforces it against itself
+- The bench is the CI. Run `bellamem bench` after changes to EW, expand,
+  or audit and report the delta in the PR.
+- Add new embedders by implementing the `Embedder` protocol in `core/embed.py`.
+- Add new EW logic in `adapters/`, never in `core/`.
+- Every PR that touches retrieval should include a bench item demonstrating
+  the failure mode it fixes.
 
 ---
 

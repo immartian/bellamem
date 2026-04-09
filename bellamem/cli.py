@@ -1,10 +1,13 @@
-"""bellamem CLI — manual dogfooding.
+"""bellamem CLI.
 
-    bellamem ingest-cc [--cwd PATH]   # ingest Claude Code transcripts
-    bellamem expand "focus" [-t N]    # print mass-weighted context pack
-    bellamem show [--min-mass M]      # render the whole forest
-    bellamem stats                    # summary
-    bellamem reset                    # delete snapshot
+    bellamem ingest-cc [--cwd PATH]   ingest Claude Code transcripts
+    bellamem expand "focus" [-t N]    generic mass-weighted context pack
+    bellamem before-edit "focus"      5-layer pack for a proposed edit
+    bellamem audit                    bandaid piles / ratified / disputes
+    bellamem bench                    empirical comparison vs flat/RAG
+    bellamem entities [name]          R6 entity index inspection
+    bellamem show / stats / reset     inspect / reset snapshot
+    bellamem embedder                 show active embedder
 """
 
 from __future__ import annotations
@@ -13,7 +16,7 @@ import argparse
 import os
 import sys
 
-from .core import Bella, save, load, seed_principles
+from .core import Bella, save, load
 from .core.audit import audit, render_report
 from .core.embed import (
     EmbedderMismatch,
@@ -55,16 +58,11 @@ def cmd_ingest_cc(args: argparse.Namespace) -> int:
     except EmbedderMismatch as e:
         print(f"error: {e}", file=sys.stderr)
         return 3
-    # Always seed principles first — the constitution is loaded before
-    # any conversation claim so mass-ranking reflects it from turn 1.
-    pres = seed_principles(bella, path=args.principles)
-    if pres["path"]:
-        print(f"  principles: {pres['count']} from {pres['path']} "
-              f"(+{pres['added']} new, {pres['reseeded']} reseeded)")
-    else:
-        print("  principles: no PRINCIPLES.md found (skipping)")
     before = sum(len(g.beliefs) for g in bella.fields.values())
-    results = ingest_project(bella, cwd=args.cwd)
+    results = ingest_project(
+        bella, cwd=args.cwd,
+        tail=args.tail, no_llm=args.no_llm, latest_only=args.latest_only,
+    )
     save(bella, snap)
     after = sum(len(g.beliefs) for g in bella.fields.values())
     if not results:
@@ -246,6 +244,7 @@ def cmd_bench(args: argparse.Namespace) -> int:
         contenders=contenders,
         openai_client=openai_client,
         model=args.model,
+        use_llm_judge=args.llm_judge,
     )
     print(render_report(report))
     return 0
@@ -291,7 +290,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     sp = sub.add_parser("ingest-cc", help="ingest Claude Code .jsonl transcripts")
     sp.add_argument("--cwd", help="project cwd (defaults to current working dir)")
-    sp.add_argument("--principles", help="path to PRINCIPLES.md (default: walk up from cwd)")
+    sp.add_argument("--tail", type=int, default=None,
+                    help="limit each session to its last N turns (fast partial ingest)")
+    sp.add_argument("--no-llm", action="store_true",
+                    help="disable LLM-backed EW regardless of BELLAMEM_EW")
+    sp.add_argument("--latest-only", action="store_true",
+                    help="only ingest the most recent session (demos / quick tests)")
     sp.set_defaults(func=cmd_ingest_cc)
 
     sp = sub.add_parser("expand", help="print a mass-weighted context pack")
@@ -336,16 +340,18 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--contenders",
                     help="comma-separated subset: flat_tail,compact,rag_topk,expand,before_edit")
     sp.add_argument("--model", default="gpt-4o-mini",
-                    help="model for compact contender (default gpt-4o-mini)")
+                    help="model for compact contender + llm judge")
+    sp.add_argument("--llm-judge", action="store_true",
+                    help="enable the LLM judge metric (costs ~$0.005 per run)")
     sp.set_defaults(func=cmd_bench)
 
-    sp = sub.add_parser("audit", help="report contradictions, bandaid piles, drift")
+    sp = sub.add_parser("audit", help="bandaid piles + top ratified + disputes")
     sp.add_argument("--top", type=int, default=10,
-                    help="number of top-ratified beliefs to show (default 10)")
+                    help="rows per section (default 10)")
     sp.add_argument("--max-per-section", type=int, default=10,
-                    help="max rows per issue section (default 10)")
+                    help="max rows per section (default 10)")
     sp.add_argument("--no-exit-code", action="store_true",
-                    help="always exit 0 even if issues are found")
+                    help="always exit 0 even if bandaid piles are found")
     sp.set_defaults(func=cmd_audit)
 
     return p

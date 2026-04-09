@@ -1,29 +1,88 @@
 # Changelog
 
 All notable changes will be documented in this file. This project aims
-for [Semantic Versioning](https://semver.org). Until v1.0 everything is
-subject to change.
+for [Semantic Versioning](https://semver.org). Until v1.0, everything
+is subject to change.
+
+## [0.0.2] — 2026-04-09 — rescope to context window management
+
+**Removed the constitution layer** as mission creep. bellamem's job is
+context window management for LLM coding agents — retrieving the
+decisive facts for the next edit under a small token budget — and the
+earlier PRINCIPLES.md / governance layer was a different problem
+pretending to be the same one.
+
+### Removed
+
+- `core/principles.py` — the PRINCIPLES.md loader
+- `bellamem/principles/classic.md` — the canonical engineering canon
+- `PRINCIPLES.md` at the repo root — the project constitution
+- Contradiction-against-principle detection in `core/audit.py`
+- Drift-candidates-near-principle detection in `core/audit.py`
+- `--principles` flag on `ingest-cc`
+- `seed_principles` export from `core/__init__.py`
+- Bench items that specifically tested constitution features (Q03, Q11)
+- Constitution references throughout README, ARCHITECTURE, CHANGELOG
+
+### Retained
+
+- **All core data model** — `gene.py`, `ops.py`, `bella.py`, `embed.py`,
+  `store.py` unchanged
+- **`mass_floor` field on Belief** — kept as generic plumbing for
+  pinning a belief's mass above a threshold. Not a governance concept.
+- **`__self__` reserved field** — R4 self-observation, part of
+  the memory, not the constitution
+- **Reserved field prefix rules** — `__` prefix still protected,
+  `is_reserved_field` still exported
+- **Bandaid pile detection in audit** — R2 entropy signal, part of
+  context quality (identifies structural problems disguised as bugs)
+- **Top ratified decisions report in audit** — useful summary of
+  "what did we commit to"
+- **Top disputes (⊥ edges) in audit** — rejected approaches preserved
+
+### Added
+
+- **Disputes summary in `bellamem audit`** — replaces the removed
+  contradiction section with a simpler "top disputes by mass" listing
+
+### Why this matters
+
+The bench numbers from v0.0.1 **do not depend on the constitution
+layer**. The before-edit pack's wins come from disputes, entity
+bridges, and multi-voice ratified beliefs — all of which are populated
+from the session transcript, not from a hand-written PRINCIPLES.md.
+The rescope removes ~300 LOC and ~60% of the documentation without
+touching the load-bearing retrieval machinery.
+
+### Migration
+
+If you were using a PRINCIPLES.md with v0.0.1: the file still has
+whatever you wrote into it, but bellamem no longer loads it. High-mass
+pinned beliefs can still be created by calling `ops.add(..., mass_floor=0.95)`
+directly; we just no longer ship a loader that reads PRINCIPLES.md and
+calls that.
+
+---
 
 ## [0.0.1] — 2026-04-09 — first dogfood
 
 Initial alpha. Built and validated end-to-end in a single long session
-(see [BENCH.md](BENCH.md) for the numbers). Scope: prove that
-BELLA's six-rule calculus works as a memory architecture for LLM
-coding agents, with enough substance to dogfood on its own construction.
+(see [BENCH.md](BENCH.md) for the numbers). Scope: prove that BELLA's
+six-rule calculus works as a memory architecture for LLM coding agents,
+with enough substance to dogfood on its own construction.
 
 ### Core (`bellamem/core/`)
 
 - **`gene.py`** — `Belief`, `Gene`, Jaynes log-odds accumulation with
   same-voice attenuation (0.1 factor). Stable belief ids via
   `md5(desc + parent)` so repeated claims deduplicate. `mass_floor`
-  field for the immutable-mass mechanism (P13).
+  field for pinned beliefs.
 - **`ops.py`** — the seven operations: CONFIRM, AMEND, ADD, DENY,
-  CAUSE, MERGE, MOVE. Every mutation of the tree flows through exactly
-  one of these. Principle P2 pins this as the complete mutation API.
+  CAUSE, MERGE, MOVE. Every mutation flows through exactly one.
 - **`bella.py`** — the `Bella` forest, routing via embedding similarity,
   `Claim` dataclass, entity index for R6 bridging, reserved field
-  rules (P18) with `is_reserved_field` guard against adapter writes,
-  `self_observation` relation routing to `__self__`.
+  rules with `is_reserved_field` guard, `self_observation` relation
+  routing to `__self__`.
 - **`embed.py`** — pluggable embedder protocol. Four backends:
   `HashEmbedder` (zero-dep default), `SentenceTransformerEmbedder`
   (`[st]` extra), `OpenAIEmbedder` (`[openai]` extra), `DiskCacheEmbedder`
@@ -31,21 +90,14 @@ coding agents, with enough substance to dogfood on its own construction.
   `make_embedder_from_env` factory. Batched cache saves (every 50
   inserts) plus explicit `flush()` — 8× ingest speedup over naive save.
 - **`store.py`** — atomic JSON snapshot (tmp+rename). Embedder
-  signature check on load — fails loud with clear reset instructions
-  if you switch embedders under an existing tree. Prevents silent
-  dimension mismatch.
-- **`principles.py`** — parses `PRINCIPLES.md` into a reserved
-  `__principles__` field at `mass = 0.98, mass_floor = 0.95`.
-  Idempotent via stable belief ids. Constitution changes require
-  editing the file.
+  signature check on load — fails loud if you switch embedders under
+  an existing tree.
 - **`expand.py`** — two modes:
   - `expand()` — generic mass-weighted pack, 60/30/10 mass/relevance/recency
-  - `expand_before_edit()` — 5-layer bandaid-blocker, 40/20/20/10/10
+  - `expand_before_edit()` — 5-layer pack, 40/20/20/10/10
     invariants/disputes/causes/bridges/self-model, **no recency**
-- **`audit.py`** — read-only drift detection: contradictions against
-  principles (cosine + ⊥ relation), bandaid piles (R2 entropy signal
-  via `_BANDAID_RE`), claims-near-principles (informational, not
-  errors).
+- **`audit.py`** — read-only report: bandaid piles (R2 entropy signal),
+  top ratified decisions, top disputes.
 
 ### Adapters (`bellamem/adapters/`)
 
@@ -53,29 +105,25 @@ coding agents, with enough substance to dogfood on its own construction.
   assistant claims at 1.05–1.3. Reaction classifier for turn-pair
   retroactive ratification (affirm/correct/neutral). Denial filter
   handles quoted (`` `don't` ``) and conditional (`if we don't`)
-  denials — both caught by the audit as real upstream bugs.
+  denials.
 - **`claude_code.py`** — reads `~/.claude/projects/<cwd>/*.jsonl`
-  transcripts. Incremental ingest via per-file line cursor in the
-  snapshot. Turn-pair retroactive ratification state machine:
-  `affirm → accumulate(lr=2.2, voice="user")`,
-  `correct → accumulate(lr=0.4, voice="user")`. Explicit cache flush
-  at end of ingest.
+  transcripts. Incremental ingest via per-file line cursor. Turn-pair
+  retroactive ratification state machine.
 - **`llm_ew.py`** — optional LLM-backed EW (`BELLAMEM_EW=hybrid`).
   `LLMExtractor` class with disk-cached gpt-4o-mini calls in JSON
-  mode. Two extraction tasks: `find_cause_pairs` (returns cause/effect
-  text spans) and `find_self_observations` (first-person habit
-  statements for `__self__`). Marker gates (`has_cause_markers`,
-  `has_self_markers`) short-circuit when there's nothing to extract.
-  Fails loud (C10) on malformed JSON. Cost: ~$0.002 per typical
-  98-turn session.
+  mode. Two extraction tasks: `find_cause_pairs` (structured cause→effect
+  extraction) and `find_self_observations` (first-person habit
+  statements for `__self__`). Marker gates short-circuit when there's
+  nothing to extract. Fails loud on malformed JSON. Cost: ~$0.002
+  per typical 98-turn session.
 
 ### CLI (`bellamem/cli.py`)
 
 ```
 bellamem ingest-cc         ingest Claude Code .jsonl transcripts
 bellamem expand QUERY      generic mass-weighted context pack
-bellamem before-edit QUERY bandaid-blocker pack with 5-layer budget
-bellamem audit             drift / contradictions / bandaid report
+bellamem before-edit QUERY 5-layer pre-edit context pack
+bellamem audit             bandaid piles / ratified / disputes
 bellamem entities [NAME]   list / inspect R6 entity bridges
 bellamem bench             compare all contenders on the corpus
 bellamem embedder          show active embedder config
@@ -84,21 +132,9 @@ bellamem stats             summary
 bellamem reset             delete the snapshot
 ```
 
-### Constitution (`PRINCIPLES.md` + `bellamem/principles/classic.md`)
-
-- 21 bellamem-specific principles (P1–P21) covering architecture,
-  dependencies, epistemics, anti-drift, and reading the tree
-- 22 canonical engineering principles (C1–C22) covering simplicity
-  (YAGNI, KISS, DRY-with-caveat), responsibility, honesty/failure
-  (fail-loud, explicit>implicit, parse-don't-validate), state
-  correctness, change discipline (break-forward)
-- Seeded into a reserved `__principles__` field with `mass_floor = 0.95`
-- The `audit` command detects any claim contradicting a principle via
-  cosine + ⊥ relation
-
 ### Bench (`bellamem/bench.py` + `bench_corpus.py`)
 
-- 15-item hand-labeled corpus drawn from the v0.0.1 dogfood session
+- 15-item hand-labeled corpus drawn from the dogfood session
 - 5 contenders: `flat_tail`, `compact` (gpt-4o-mini summary),
   `rag_topk`, `expand`, `before_edit`
 - 2 metrics: `exact` (substring) and `embed` (cosine ≥ 0.40, union
@@ -114,42 +150,25 @@ flat_tail  13 %   compact  33 %   rag_topk  93 %   expand  100 %   before_edit  
 ```
 
 `before_edit` at 500 tokens reaches 100%; `flat_tail` plateaus at 93%
-and cannot reach 100% at any budget. See [BENCH.md](BENCH.md) for the
-full methodology and caveats (self-reference bias, corpus size,
+and cannot reach 100% at any budget. See [BENCH.md](BENCH.md) for
+methodology and caveats (self-reference bias, corpus size,
 retrieval-vs-behavior distinction).
-
-### Known limitations / quality debt
-
-- **Field auto-naming** uses a "first 3 non-stopword words" heuristic
-  plus code-identifier / snake_case / camelCase boosts. Produces
-  readable-ish names but occasionally gets auto-named fields like
-  `neo4j_missing_coding-agent`. Cosmetic; doesn't affect correctness.
-- **Turn-pair promotion is uniform** — a user affirm boosts all
-  preceding-turn claims equally, not just the directly-affirmed ones.
-  Works because lr=2.2 is modest; would need LLM scope detection to
-  narrow.
-- **Quoted/conditional denial filter is regex-based** and can be
-  fooled by unusual formatting. The audit catches most regressions.
-- **Ingest is one-embedding-per-claim**, not batched. Could be ~5×
-  faster with per-turn batching.
 
 ### What's not built yet (tracked for v0.1+)
 
-- **MCP server** — wrap `before_edit` + `expand` as Claude Code tools
-  so memory runs during editing, not just after
+- **MCP server + hooks** — wrap `before_edit` + `expand` as Claude
+  Code tools and integrate via `PreToolUse` / `SessionEnd` hooks
 - **R2 heal pass** — port entropy-driven restructure from the
   herenews-app `grow.py`. The MOVE/MERGE ops exist; nothing calls
   them periodically yet
 - **SQLite backing store** — when JSON snapshot starts hurting
   (~10k beliefs)
-- **Held-out bench** — split-half test to eliminate the
-  self-reference bias in the current numbers
+- **Held-out bench** — split-half test to eliminate the self-reference
+  bias in the current numbers
 - **Cross-session bench** — run the bench corpus against a different
   project's transcript
 - **Ollama backend** — fully offline LLM EW path behind `[ollama]`
   extra
-- **`__self__` routing without LLM** — regex path for obvious
-  first-person habit statements (currently LLM-only)
 
 ### Dependencies
 
@@ -158,5 +177,6 @@ Zero required runtime dependencies. Optional extras:
 - `[st]` — `sentence-transformers>=2.2` for local embeddings
 - `[openai]` — `openai>=1.0` for OpenAI embeddings + LLM-backed EW
 - `[all]` — both
+- `[test]` — `pytest>=7.0`
 
 Python 3.10+.

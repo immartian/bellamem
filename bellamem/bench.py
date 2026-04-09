@@ -30,7 +30,8 @@ from typing import TYPE_CHECKING, Callable, Optional
 
 from .bench_corpus import BENCH_ITEMS, BenchItem
 from .core.embed import cosine, current_embedder
-from .core.expand import expand, expand_before_edit, CHARS_PER_TOKEN
+from .core.expand import expand, expand_before_edit
+from .core.tokens import count_tokens, tail_tokens
 
 if TYPE_CHECKING:
     from .core.bella import Bella
@@ -58,6 +59,7 @@ class HitResult:
     contender: str
     hit_exact: bool
     hit_embed: bool
+    hit_llm: bool | None  # None if LLM judge was not run
     tokens_used: int
 
 
@@ -68,6 +70,7 @@ class BenchReport:
     avg_tokens: dict[str, float]              # contender → avg tokens used
     exact_hit_rate: dict[str, float]          # contender → 0..1
     embed_hit_rate: dict[str, float]          # contender → 0..1
+    llm_hit_rate: dict[str, float] | None = None  # None if LLM judge disabled
 
 
 # ---------------------------------------------------------------------------
@@ -108,17 +111,16 @@ def _read_transcript_turns(transcript_path: str) -> list[tuple[str, str]]:
 
 
 def _fit_budget(items: list[str], budget_tokens: int) -> tuple[list[str], int]:
-    """Greedily fit strings under a character-based token budget."""
-    budget_chars = budget_tokens * CHARS_PER_TOKEN
+    """Greedily fit strings under a real token budget."""
     selected: list[str] = []
-    used_chars = 0
+    used_tokens = 0
     for s in items:
-        cost = len(s) + 2
-        if used_chars + cost > budget_chars:
+        cost = count_tokens(s) + 1  # +1 for the join separator
+        if used_tokens + cost > budget_tokens:
             break
         selected.append(s)
-        used_chars += cost
-    return selected, used_chars // CHARS_PER_TOKEN
+        used_tokens += cost
+    return selected, used_tokens
 
 
 # ---------------------------------------------------------------------------
@@ -130,19 +132,21 @@ def contender_flat_tail(item: BenchItem, budget_tokens: int,
                         **kw) -> BenchPack:
     """Classic flat-tail context window: the last N tokens of the transcript.
 
-    Simulates what happens when an agent is handed "the last N characters
-    of history" with no structure — which is what Claude Code / Cursor
+    Simulates what happens when an agent is handed "the last N tokens of
+    history" with no structure — which is what Claude Code / Cursor
     context window management does under the hood.
+
+    Uses the real tokenizer (tiktoken if installed) so the budget is
+    enforced precisely, not by a char-count estimate.
     """
     full = "\n\n".join(f"[{v}] {t}" for v, t in transcript_turns)
-    budget_chars = budget_tokens * CHARS_PER_TOKEN
-    tail = full[-budget_chars:] if len(full) > budget_chars else full
+    tail = tail_tokens(full, budget_tokens)
     lines = [ln for ln in tail.split("\n\n") if ln.strip()]
     return BenchPack(
         contender="flat_tail",
         focus=item.query,
         lines=lines,
-        tokens_used=len(tail) // CHARS_PER_TOKEN,
+        tokens_used=count_tokens(tail),
     )
 
 
@@ -213,7 +217,7 @@ def contender_compact(item: BenchItem, budget_tokens: int,
 
     # Treat each line of the summary as a pack line
     lines = [ln.strip() for ln in summary.splitlines() if ln.strip()]
-    used_tokens = sum(len(ln) for ln in lines) // CHARS_PER_TOKEN
+    used_tokens = sum(count_tokens(ln) for ln in lines)
     return BenchPack(
         contender="compact",
         focus=item.query,
@@ -234,30 +238,29 @@ def contender_rag_topk(item: BenchItem, budget_tokens: int,
     """Classic RAG: embed each turn, rank by cosine to the query, pack top-k."""
     emb = current_embedder()
     q_vec = emb.embed(item.query)
-    # Score each turn
     scored: list[tuple[float, int]] = []
     for i, tv in enumerate(turn_embeddings):
         if tv:
             scored.append((cosine(q_vec, tv), i))
     scored.sort(key=lambda t: t[0], reverse=True)
 
-    budget_chars = budget_tokens * CHARS_PER_TOKEN
-    used = 0
+    used_tokens = 0
     lines: list[str] = []
     for score, idx in scored:
         voice, text = transcript_turns[idx]
         entry = f"[{voice} sim={score:.2f}] {text}"
-        if used + len(entry) > budget_chars:
+        entry_cost = count_tokens(entry)
+        if used_tokens + entry_cost > budget_tokens:
             continue  # try smaller candidates
         lines.append(entry)
-        used += len(entry)
-        if used >= budget_chars * 0.95:
+        used_tokens += entry_cost
+        if used_tokens >= int(budget_tokens * 0.95):
             break
     return BenchPack(
         contender="rag_topk",
         focus=item.query,
         lines=lines,
-        tokens_used=used // CHARS_PER_TOKEN,
+        tokens_used=used_tokens,
     )
 
 
@@ -339,6 +342,73 @@ def hit_embed(pack: BenchPack, expected: list[str],
 
 
 # ---------------------------------------------------------------------------
+# LLM judge metric
+# ---------------------------------------------------------------------------
+
+_JUDGE_SYSTEM = (
+    "You judge whether a context pack contains information sufficient to "
+    "answer a question correctly. You are deliberately conservative — "
+    "if the pack contains the key fact in any phrasing (paraphrased, "
+    "inverted, or expressed through a concrete example), answer YES. "
+    "Only answer NO when the decisive information is truly absent."
+)
+
+_JUDGE_USER_TEMPLATE = """Question:
+\"\"\"
+{query}
+\"\"\"
+
+Pack content:
+\"\"\"
+{pack_text}
+\"\"\"
+
+Relevant reference phrases that would answer the question (for your
+orientation — semantic match counts, not substring match):
+{reference_list}
+
+Does the pack contain information sufficient to answer the question
+correctly? Return strict JSON: {{"sufficient": true|false, "why": "..."}}.
+"""
+
+
+def hit_llm_judge(pack: BenchPack, item: BenchItem, *,
+                  openai_client, model: str,
+                  cache: dict) -> bool:
+    """One gpt-4o-mini call per (item, pack). Cached by content hash."""
+    if not pack.lines:
+        return False
+    pack_text = pack.as_text()[:6000]  # bound input size
+    import hashlib
+    key = hashlib.md5(
+        f"{model}|{item.query}|{pack_text}|{'|'.join(item.expected_any_of)}".encode()
+    ).hexdigest()
+    if key in cache:
+        return bool(cache[key])
+    reference_list = "\n".join(f"  - {e}" for e in item.expected_any_of)
+    user = _JUDGE_USER_TEMPLATE.format(
+        query=item.query,
+        pack_text=pack_text,
+        reference_list=reference_list,
+    )
+    resp = openai_client.chat.completions.create(
+        model=model,
+        temperature=0.0,
+        response_format={"type": "json_object"},
+        max_tokens=200,
+        messages=[
+            {"role": "system", "content": _JUDGE_SYSTEM},
+            {"role": "user", "content": user},
+        ],
+    )
+    content = (resp.choices[0].message.content or "").strip()
+    result = json.loads(content)
+    hit = bool(result.get("sufficient", False))
+    cache[key] = hit
+    return hit
+
+
+# ---------------------------------------------------------------------------
 # Runner
 # ---------------------------------------------------------------------------
 
@@ -350,8 +420,14 @@ def run_bench(
     contenders: Optional[list[str]] = None,
     openai_client=None,
     model: str = "gpt-4o-mini",
+    use_llm_judge: bool = False,
 ) -> BenchReport:
-    """Run the full bench and return a BenchReport."""
+    """Run the full bench and return a BenchReport.
+
+    If use_llm_judge is True, also run a third metric (llm_judge) using
+    one gpt-4o-mini call per (item, contender) to semantically decide
+    whether the pack contains sufficient information. Requires openai_client.
+    """
     items = BENCH_ITEMS
     contender_names = contenders or list(CONTENDERS.keys())
 
@@ -361,11 +437,13 @@ def run_bench(
     # Embed each turn once (cached via the DiskCacheEmbedder if active)
     turn_embeddings = [emb.embed(t) for _v, t in transcript_turns]
     compact_cache: dict = {}
+    judge_cache: dict = {}
 
     results: dict[str, dict[str, HitResult]] = {}
     tokens_accum: dict[str, list[int]] = {c: [] for c in contender_names}
     exact_hits: dict[str, int] = {c: 0 for c in contender_names}
     embed_hits: dict[str, int] = {c: 0 for c in contender_names}
+    llm_hits: dict[str, int] = {c: 0 for c in contender_names}
 
     for item in items:
         results[item.id] = {}
@@ -382,11 +460,22 @@ def run_bench(
             )
             he = hit_exact(pack, item.expected_any_of)
             hm = hit_embed(pack, item.expected_any_of)
+            hl: bool | None = None
+            if use_llm_judge and openai_client is not None:
+                hl = hit_llm_judge(
+                    pack, item,
+                    openai_client=openai_client,
+                    model=model,
+                    cache=judge_cache,
+                )
+                if hl:
+                    llm_hits[name] += 1
             results[item.id][name] = HitResult(
                 item_id=item.id,
                 contender=name,
                 hit_exact=he,
                 hit_embed=hm,
+                hit_llm=hl,
                 tokens_used=pack.tokens_used,
             )
             tokens_accum[name].append(pack.tokens_used)
@@ -396,7 +485,7 @@ def run_bench(
                 embed_hits[name] += 1
 
     n = max(1, len(items))
-    return BenchReport(
+    report = BenchReport(
         items=items,
         results=results,
         avg_tokens={c: sum(tokens_accum[c]) / max(1, len(tokens_accum[c]))
@@ -404,6 +493,9 @@ def run_bench(
         exact_hit_rate={c: exact_hits[c] / n for c in contender_names},
         embed_hit_rate={c: embed_hits[c] / n for c in contender_names},
     )
+    if use_llm_judge:
+        report.llm_hit_rate = {c: llm_hits[c] / n for c in contender_names}
+    return report
 
 
 # ---------------------------------------------------------------------------
@@ -426,7 +518,15 @@ def render_report(report: BenchReport) -> str:
         row = f"{item.id:<6} {item.category:<13}"
         for c in contenders:
             hr = report.results[item.id][c]
-            mark = "✓" if hr.hit_exact else ("~" if hr.hit_embed else "✗")
+            # Mark priority: LLM judge > exact > embed > miss
+            if hr.hit_llm is True:
+                mark = "J"
+            elif hr.hit_exact:
+                mark = "✓"
+            elif hr.hit_embed:
+                mark = "~"
+            else:
+                mark = "✗"
             row += f" {mark:>12}"
         lines.append(row)
     lines.append("")
@@ -448,10 +548,20 @@ def render_report(report: BenchReport) -> str:
         embed_row += f" {pct:>10.0f} %"
     lines.append(embed_row)
 
+    if report.llm_hit_rate is not None:
+        llm_row = f"{'llm judge rate':<17}"
+        for c in contenders:
+            pct = report.llm_hit_rate[c] * 100
+            llm_row += f" {pct:>10.0f} %"
+        lines.append(llm_row)
+
     tok_row = f"{'avg tokens used':<17}"
     for c in contenders:
         tok_row += f" {report.avg_tokens[c]:>12.0f}"
     lines.append(tok_row)
     lines.append("")
-    lines.append("legend: ✓ exact hit  ~ embed-only hit  ✗ miss")
+    if report.llm_hit_rate is not None:
+        lines.append("legend: J llm-judge hit  ✓ exact hit  ~ embed-only  ✗ miss")
+    else:
+        lines.append("legend: ✓ exact hit  ~ embed-only hit  ✗ miss")
     return "\n".join(lines)

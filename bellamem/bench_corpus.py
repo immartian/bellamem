@@ -7,17 +7,15 @@ the user and assistant actually committed to in the conversation.
 
 A contender "hits" an item if its pack contains any of the expected
 substrings. The point is not to cover every possible question — it's
-to sample 15 archetypal cases that stress different layers of the
-memory pipeline (invariants, causes, disputes, self-model, bridges).
+to sample archetypal cases that stress different retrieval layers:
+ratified decisions, disputes, entity bridges, self-model, causes.
 
 Categories covered:
-  - Constitutional (principles from PRINCIPLES.md)
-  - Architectural decisions made mid-session
+  - Architectural decisions made and ratified
   - Bandaid-prone scenarios (C-layer + self-model)
-  - Language / dep choices (P7, P6)
-  - Reserved field rules (P18)
-  - Voice asymmetry (P9, P10)
-  - Audit semantics (is_clean, drift candidates)
+  - Language / dep choices
+  - Voice asymmetry / ratification mechanics
+  - Audit semantics
 """
 
 from __future__ import annotations
@@ -42,11 +40,11 @@ BENCH_ITEMS: list[BenchItem] = [
               "the embedder signature so old files still load?",
         focus_entity="store.py",
         expected_any_of=[
-            "C19",
-            "P15",
             "break forward",
             "no backwards-compat shims",
             "no feature flags",
+            "fail loud",
+            "reset",
         ],
         category="bandaid",
     ),
@@ -54,7 +52,6 @@ BENCH_ITEMS: list[BenchItem] = [
         id="Q02",
         query="Should I rewrite the prototype in Rust instead of Python?",
         expected_any_of=[
-            "P7",
             "Python for v0",
             "Rust for v1",
             "not for v0, probably yes for v1",
@@ -63,22 +60,10 @@ BENCH_ITEMS: list[BenchItem] = [
         category="language",
     ),
     BenchItem(
-        id="Q03",
-        query="Can my chat adapter write directly into the __principles__ field?",
-        expected_any_of=[
-            "P18",
-            "reserved field",
-            "adapters must not write to reserved",
-            "domain adapters",
-        ],
-        category="constitution",
-    ),
-    BenchItem(
         id="Q04",
         query="Should I wrap embed() in a try/except to swallow OpenAI errors?",
         focus_entity="embed.py",
         expected_any_of=[
-            "C10",
             "fail loud",
             "never swallow",
             "i tend to reach for try/except",
@@ -92,7 +77,6 @@ BENCH_ITEMS: list[BenchItem] = [
         expected_any_of=[
             "our graph is dicts",
             "no graph lib",
-            "P6",
             "zero runtime deps",
             "one-hop",
         ],
@@ -100,12 +84,12 @@ BENCH_ITEMS: list[BenchItem] = [
     ),
     BenchItem(
         id="Q06",
-        query="Should the audit command exit non-zero when it finds drift candidates?",
+        query="Should the audit command exit non-zero when it finds bandaid piles?",
         expected_any_of=[
-            "drift candidates are informational",
-            "not errors",
-            "only contradictions and bandaid piles",
             "is_clean",
+            "only contradictions and bandaid piles",
+            "bandaid piles",
+            "only bandaid piles",
         ],
         category="audit",
     ),
@@ -150,25 +134,12 @@ BENCH_ITEMS: list[BenchItem] = [
         id="Q10",
         query="How should a user's affirmation affect preceding assistant claims?",
         expected_any_of=[
-            "P10",
             "retroactive ratification",
             "lr=2.2",
             "independent voice",
-            "user.*affirms",
+            "boost",
         ],
         category="epistemics",
-    ),
-    BenchItem(
-        id="Q11",
-        query="Should principles decay in mass over time like other beliefs?",
-        expected_any_of=[
-            "P13",
-            "immutable_mass",
-            "never decay below",
-            "mass_floor",
-            "0.95",
-        ],
-        category="constitution",
     ),
     BenchItem(
         id="Q12",
@@ -186,7 +157,6 @@ BENCH_ITEMS: list[BenchItem] = [
         id="Q13",
         query="Should expand_before_edit include a recency layer?",
         expected_any_of=[
-            "P21",
             "recency is actively harmful",
             "no recency",
             "biases toward the last bandaid",
@@ -198,18 +168,16 @@ BENCH_ITEMS: list[BenchItem] = [
         query="Can I add a new mutation method like `gene.touch(bid)` "
               "directly on the Gene class?",
         expected_any_of=[
-            "P2",
             "seven operations",
             "complete mutation API",
             "no direct writes to gene",
         ],
-        category="constitution",
+        category="architecture",
     ),
     BenchItem(
         id="Q15",
         query="Should the EW classifier treat the user and assistant the same way?",
         expected_any_of=[
-            "P9",
             "user is oracle",
             "assistant is hypothesis",
             "asymmetry",

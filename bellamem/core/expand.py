@@ -22,19 +22,15 @@ from typing import TYPE_CHECKING, Optional
 
 from .embed import embed, cosine
 from .gene import Belief, REL_SUPPORT, REL_COUNTER, REL_CAUSE
-from .principles import PRINCIPLES_FIELD
+from .tokens import count_tokens
 
 if TYPE_CHECKING:
     from .bella import Bella
 
 
-# Name of the reserved self-model field. Populated by future EW for
-# first-person assistant observations ("I tend to X"). Empty in v0.
+# Reserved self-model field. Populated by the LLM EW for first-person
+# assistant observations ("I tend to X"). Core-owned, not adapter-writable.
 SELF_MODEL_FIELD = "__self__"
-
-
-# ~4 chars per token — coarse, fine for v0
-CHARS_PER_TOKEN = 4
 
 
 @dataclass
@@ -62,7 +58,7 @@ class Pack:
         return f"{header}\n{body}"
 
     def used_tokens(self) -> int:
-        return sum(len(ln.render()) for ln in self.lines) // CHARS_PER_TOKEN
+        return sum(count_tokens(ln.render()) for ln in self.lines)
 
 
 def _mass_rank(bella: "Bella", q_emb: list[float] | None = None
@@ -151,7 +147,7 @@ def expand(bella: "Bella", focus: str, budget_tokens: int = 1200,
         if b.id in seen:
             return False
         line = PackLine(field_name=fname, belief=b, score=score, bucket=bucket)
-        cost = len(line.render()) // CHARS_PER_TOKEN + 1
+        cost = count_tokens(line.render()) + 1
         if quota_used[0] + cost > quota:
             return False
         pack.lines.append(line)
@@ -222,10 +218,12 @@ def _causes_for(bella: "Bella", q_emb: list[float]
     """Walk the tree for any belief whose relation is CAUSE and whose
     embedding is similar to the focus. These are root causes the agent
     has previously recorded for something close to the current task.
+    Reserved fields (__self__, anything else __-prefixed) are excluded.
     """
+    from .bella import is_reserved_field
     out: list[tuple[str, Belief, float]] = []
     for fname, g in bella.fields.items():
-        if fname in (PRINCIPLES_FIELD, SELF_MODEL_FIELD):
+        if is_reserved_field(fname):
             continue
         for b in g.beliefs.values():
             if b.rel != REL_CAUSE:
@@ -277,20 +275,20 @@ def _self_model_for(bella: "Bella", q_emb: list[float] | None
     return out
 
 
-def _invariants_for(bella: "Bella", q_emb: list[float] | None,
-                    floor: float = 0.80
+def _invariants_for(bella: "Bella", q_emb: list[float] | None
                     ) -> list[tuple[str, Belief, float]]:
-    """All principles (m >= floor) plus any other field belief at or above
-    the floor. Tie-broken by focus relevance so the most topical principles
-    surface first.
+    """Rank all non-self-model beliefs by mass, tie-broken by focus relevance.
+
+    No absolute mass floor — the budget cap determines the cutoff. This
+    lets the ranker work on any tree shape: when high-mass pinned
+    beliefs exist, they dominate; when they don't, the highest-mass
+    ratified conversation beliefs fill the layer.
     """
     out: list[tuple[str, Belief, float, float]] = []
     for fname, g in bella.fields.items():
         if fname == SELF_MODEL_FIELD:
             continue
         for b in g.beliefs.values():
-            if b.mass < floor:
-                continue
             rel = cosine(q_emb, b.embedding) if (q_emb and b.embedding) else 0.0
             out.append((fname, b, b.mass, rel))
     out.sort(key=lambda t: (t[2], t[3]), reverse=True)
@@ -330,7 +328,7 @@ def expand_before_edit(bella: "Bella", focus: str,
         if b.id in seen:
             return False
         line = PackLine(field_name=fname, belief=b, score=score, bucket=bucket)
-        cost = len(line.render()) // CHARS_PER_TOKEN + 1
+        cost = count_tokens(line.render()) + 1
         if quota_used[0] + cost > quota:
             return False
         pack.lines.append(line)
@@ -338,7 +336,8 @@ def expand_before_edit(bella: "Bella", focus: str,
         quota_used[0] += cost
         return True
 
-    # 1) Invariants — principles + other high-mass rules
+    # 1) Invariants — mass-ranked beliefs (principles if present, else
+    # top-ranked ratified conversation beliefs). No absolute floor.
     inv_used = [0]
     for fname, b, m in _invariants_for(bella, q_emb):
         try_add(fname, b, m, "mass", inv_used, q_inv)
