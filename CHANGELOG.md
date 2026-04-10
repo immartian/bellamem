@@ -132,8 +132,43 @@ assumed a global `~/.bellamem/` snapshot and the bellamem repo's own
   `.venv/bin/bellamem` first, then `command -v bellamem`, fails loud
   with install instructions if neither is available.
 
+### Changed
+
+- **`bellamem save` and `bellamem ingest-cc` now default to "current
+  session only"** — the mtime-latest transcript, i.e. the session
+  Claude Code is actively writing to. The old "sweep every transcript
+  in the project" behaviour is still available via the new
+  `--all-sessions` flag, and is the right thing for first-run backfill
+  or recovery after `bellamem reset`. The default flipped because
+  the common case for `/bellamem save` is end-of-session save of the
+  current day's work, not batch ingest of months of history. The
+  old `--latest-only` flag is kept as a compat alias; it's now
+  redundant.
+
 ### Fixed
 
+- **`bellamem save --latest-only` picked the wrong file.** The
+  adapter's `list_sessions` sorted transcripts alphabetically by
+  their random UUID filename, so `sessions[-1]` (what `latest_only`
+  returned) was whatever UUID sorted last, not the mtime-latest
+  file. Fixed by sorting on `os.path.getmtime()` instead. Caught
+  during dogfood when `bellamem save --latest-only` in a real
+  project ingested a March 14 session instead of today's active
+  one, and a subsequent `/bellamem resume` showed confidently stale
+  content.
+- **`replay._latest_session_key` picked by belief event_time
+  (ingest time, not turn time).** A batch ingest leaves every new
+  belief with nearly identical `event_time`, so the tiebreak was
+  effectively random and often landed on a months-old session.
+  Fixed by picking the session whose underlying `.jsonl` file has
+  the newest mtime on disk. Same root cause as the `list_sessions`
+  bug above — "use filesystem mtime, not the in-memory stamp."
+- **`bellamem save` streams per-session progress during ingest**,
+  instead of printing the whole summary after the full ingest
+  completes. `adapters/claude_code.py:ingest_project` is now a
+  generator that yields one result per session; CLI callers
+  iterate and print as each session finishes. Previously the save
+  could spend 50 minutes at 98% CPU with zero visible output.
 - **`bellamem save` and long ingests now show progress in real time.**
   Python's default stdout buffering is line-buffered for a TTY but
   fully block-buffered (4-8 KB) for a pipe, which is how Claude Code

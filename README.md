@@ -445,19 +445,23 @@ questions that were already answered. That's the working reference
 point — a resume that costs much more is usually a sign the graph
 needs `bellamem emerge` to consolidate near-duplicates.
 
-> **First run on an existing project may take a while.** BellaMem
-> ingests every Claude Code transcript the project has accumulated,
-> not just the current session. A project with months of history and
-> hundreds of megabytes of transcripts can take tens of minutes to
-> several hours on the *first* `/bellamem save`. Two ways to bound it:
+> **`bellamem save` defaults to the current session only** — the
+> transcript file Claude Code is actively writing to, picked by
+> filesystem mtime. This is the right behavior for end-of-session
+> "save my day's work" flow, which is the common case. If you want
+> to backfill every transcript the project has accumulated (first
+> install, or after `bellamem reset`), use:
 >
 > ```bash
-> bellamem save --tail 200       # only the last 200 turns of each transcript
-> bellamem save --latest-only    # only the single most recent transcript
+> bellamem save --all-sessions   # ingest every transcript in the project
+> bellamem save --tail 200       # cap whichever sessions are being ingested
 > ```
 >
-> Subsequent saves are incremental — only new turns get processed —
-> so the first run is usually the only slow one.
+> On a project with months of history, `--all-sessions` may take
+> tens of minutes to several hours on the first run. Per-session
+> progress streams to the terminal so you can watch it work. The
+> `--tail` flag is a bounding knob that applies whether you're
+> ingesting one session or all of them.
 
 ### Where your data lives
 

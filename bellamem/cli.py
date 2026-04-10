@@ -90,13 +90,19 @@ def cmd_ingest_cc(args: argparse.Namespace) -> int:
         return 3
     before = sum(len(g.beliefs) for g in bella.fields.values())
 
+    # Default is "current session only" (the mtime-latest transcript).
+    # --all-sessions flips to the old "every transcript" behaviour, used
+    # for first-run backfill or recovery after `bellamem reset`.
+    # --latest-only is kept as a compat alias but is now redundant.
+    latest_only = not args.all_sessions
+
     # Stream each session's result as soon as ingest_session returns,
     # not at the end of the batch. Keeps the terminal responsive on
     # large first-run ingests.
     results: list[dict] = []
     for r in ingest_project(
         bella, cwd=args.cwd,
-        tail=args.tail, no_llm=args.no_llm, latest_only=args.latest_only,
+        tail=args.tail, no_llm=args.no_llm, latest_only=latest_only,
     ):
         results.append(r)
         print(_format_session_result(r))
@@ -599,6 +605,10 @@ def cmd_save(args: argparse.Namespace) -> int:
     print()
     before = sum(len(g.beliefs) for g in bella.fields.values())
 
+    # Default is "current session only" (the mtime-latest transcript).
+    # --all-sessions flips to the old "every transcript" behaviour.
+    latest_only = not args.all_sessions
+
     # Stream per-session results so the user sees progress on long
     # first-run ingests instead of staring at an empty output file.
     results: list[dict] = []
@@ -607,7 +617,7 @@ def cmd_save(args: argparse.Namespace) -> int:
         cwd=args.cwd,
         tail=args.tail,
         no_llm=args.no_llm,
-        latest_only=args.latest_only,
+        latest_only=latest_only,
     ):
         results.append(r)
         print(_format_session_result(r))
@@ -896,14 +906,23 @@ def build_parser() -> argparse.ArgumentParser:
     # a (possibly empty) $ARGUMENTS through without a shell dispatcher.
     sub = p.add_subparsers(dest="cmd", required=False)
 
-    sp = sub.add_parser("ingest-cc", help="ingest Claude Code .jsonl transcripts")
+    sp = sub.add_parser(
+        "ingest-cc",
+        help="ingest Claude Code .jsonl transcripts "
+             "(default: current session only)",
+    )
     sp.add_argument("--cwd", help="project cwd (defaults to current working dir)")
     sp.add_argument("--tail", type=int, default=None,
                     help="limit each session to its last N turns (fast partial ingest)")
     sp.add_argument("--no-llm", action="store_true",
                     help="disable LLM-backed EW regardless of BELLAMEM_EW")
+    sp.add_argument("--all-sessions", action="store_true",
+                    help="ingest every transcript in the project, not just "
+                         "the current session (use for first-run backfill "
+                         "or after `bellamem reset`)")
     sp.add_argument("--latest-only", action="store_true",
-                    help="only ingest the most recent session (demos / quick tests)")
+                    help="(compat alias; the default is now 'current session "
+                         "only' so this flag is redundant)")
     sp.add_argument("--no-emerge", action="store_true",
                     help="skip R3 auto-consolidation at end of ingest")
     sp.set_defaults(func=cmd_ingest_cc)
@@ -991,8 +1010,13 @@ def build_parser() -> argparse.ArgumentParser:
                     help="limit each session to its last N turns")
     sp.add_argument("--no-llm", action="store_true",
                     help="disable LLM-backed EW regardless of BELLAMEM_EW")
+    sp.add_argument("--all-sessions", action="store_true",
+                    help="ingest every transcript in the project, not just "
+                         "the current session (use for first-run backfill "
+                         "or after `bellamem reset`)")
     sp.add_argument("--latest-only", action="store_true",
-                    help="only ingest the most recent session")
+                    help="(compat alias; the default is now 'current session "
+                         "only' so this flag is redundant)")
     sp.add_argument("--no-emerge", action="store_true",
                     help="skip R3 auto-consolidation at end of ingest")
     sp.add_argument("--audit-top", type=int, default=10,
