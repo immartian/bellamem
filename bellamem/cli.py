@@ -69,6 +69,16 @@ def _setup_embedder() -> None:
         raise SystemExit(2)
 
 
+def _format_session_result(r: dict) -> str:
+    """Format one per-session ingest result for streaming display."""
+    line = f"  {r['session']}: +{r['turns']} turns → +{r['claims']} claims"
+    if r.get("affirmed") or r.get("corrected"):
+        line += f"  (affirmed:{r.get('affirmed', 0)} corrected:{r.get('corrected', 0)})"
+    if r.get("causes") or r.get("self_obs"):
+        line += f"  (causes:{r.get('causes', 0)} self_obs:{r.get('self_obs', 0)})"
+    return line
+
+
 def cmd_ingest_cc(args: argparse.Namespace) -> int:
     from .adapters.claude_code import ingest_project
     _setup_embedder()
@@ -79,10 +89,18 @@ def cmd_ingest_cc(args: argparse.Namespace) -> int:
         print(f"error: {e}", file=sys.stderr)
         return 3
     before = sum(len(g.beliefs) for g in bella.fields.values())
-    results = ingest_project(
+
+    # Stream each session's result as soon as ingest_session returns,
+    # not at the end of the batch. Keeps the terminal responsive on
+    # large first-run ingests.
+    results: list[dict] = []
+    for r in ingest_project(
         bella, cwd=args.cwd,
         tail=args.tail, no_llm=args.no_llm, latest_only=args.latest_only,
-    )
+    ):
+        results.append(r)
+        print(_format_session_result(r))
+
     after_ingest = sum(len(g.beliefs) for g in bella.fields.values())
 
     # R3 auto-emerge: consolidation is part of the ingest pipeline, not a
@@ -100,13 +118,6 @@ def cmd_ingest_cc(args: argparse.Namespace) -> int:
     if not results:
         print(f"no Claude Code transcripts found for cwd={args.cwd or os.getcwd()}")
         return 1
-    for r in results:
-        line = f"  {r['session']}: +{r['turns']} turns → +{r['claims']} claims"
-        if r.get("affirmed") or r.get("corrected"):
-            line += f"  (affirmed:{r.get('affirmed', 0)} corrected:{r.get('corrected', 0)})"
-        if r.get("causes") or r.get("self_obs"):
-            line += f"  (causes:{r.get('causes', 0)} self_obs:{r.get('self_obs', 0)})"
-        print(line)
     if merged:
         print(f"emerge (auto): merged {merged} near-duplicate pair(s)")
     print(f"beliefs: {before} → {after_ingest} → {after}"
@@ -587,13 +598,20 @@ def cmd_save(args: argparse.Namespace) -> int:
     print("## Ingest with auto-consolidation")
     print()
     before = sum(len(g.beliefs) for g in bella.fields.values())
-    results = ingest_project(
+
+    # Stream per-session results so the user sees progress on long
+    # first-run ingests instead of staring at an empty output file.
+    results: list[dict] = []
+    for r in ingest_project(
         bella,
         cwd=args.cwd,
         tail=args.tail,
         no_llm=args.no_llm,
         latest_only=args.latest_only,
-    )
+    ):
+        results.append(r)
+        print(_format_session_result(r))
+
     after_ingest = sum(len(g.beliefs) for g in bella.fields.values())
 
     merged = 0
@@ -607,13 +625,6 @@ def cmd_save(args: argparse.Namespace) -> int:
     if not results:
         print(f"no Claude Code transcripts found for cwd={args.cwd or os.getcwd()}")
         return 1
-    for r in results:
-        line = f"  {r['session']}: +{r['turns']} turns → +{r['claims']} claims"
-        if r.get("affirmed") or r.get("corrected"):
-            line += f"  (affirmed:{r.get('affirmed', 0)} corrected:{r.get('corrected', 0)})"
-        if r.get("causes") or r.get("self_obs"):
-            line += f"  (causes:{r.get('causes', 0)} self_obs:{r.get('self_obs', 0)})"
-        print(line)
     if merged:
         print(f"emerge (auto): merged {merged} near-duplicate pair(s)")
     print(

@@ -347,19 +347,24 @@ def ingest_session(bella: Bella, path: str, *, tail: int | None = None,
 def ingest_project(bella: Bella, cwd: str | None = None,
                     *, tail: int | None = None,
                     no_llm: bool = False,
-                    latest_only: bool = False) -> list[dict]:
-    """Ingest all transcripts for the given project cwd.
+                    latest_only: bool = False) -> Iterator[dict]:
+    """Yield ingest results one session at a time.
+
+    This is a generator rather than a list-returning function so CLI
+    callers can print per-session progress in real time. Programmatic
+    callers that want the old list behaviour can wrap the call in
+    `list(ingest_project(...))` — the yielded dicts have exactly the
+    same shape as before.
 
     Flags:
       tail          — if set, limit each session to its last N turns
       no_llm        — disable LLM-backed EW regardless of env
-      latest_only   — only ingest the most recent session (useful for demos)
+      latest_only   — only ingest the most recent session (useful for
+                      first-run bounded ingests on large projects)
     """
-    results: list[dict] = []
     sessions = list_sessions(cwd)
     if latest_only and sessions:
         # list_sessions returns sorted asc; take the last one
         sessions = [sessions[-1]]
     for path in sessions:
-        results.append(ingest_session(bella, path, tail=tail, no_llm=no_llm))
-    return results
+        yield ingest_session(bella, path, tail=tail, no_llm=no_llm)
