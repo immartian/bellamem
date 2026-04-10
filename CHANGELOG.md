@@ -63,6 +63,19 @@ assumed a global `~/.bellamem/` snapshot and the bellamem repo's own
   for direct rasterization; without it, `bellamem render` writes a
   `.dot` source file and tells you how to render it with the system
   `dot` command.
+- **`bellamem prune`** — structural forgetting: remove leaf beliefs
+  that never earned their place. A belief is a prune candidate iff
+  it's a leaf (no children), single-voice (`n_voices == 1`), in the
+  base-mass band (`0.48 ≤ mass ≤ 0.55`, i.e. Jaynes never moved it
+  off the prior), not itself a ⊥ dispute or ⇒ cause, in a non-reserved
+  field, has no `mass_floor` pin, and has been both (a) untouched for
+  `--age-days` (default 30) and (b) created more than `--grace-days`
+  ago (default 14). Dry-run is the default: users must pass `--apply`
+  to actually mutate the snapshot. Complements R3 emerge — emerge
+  collapses duplicates, prune removes orphans. Together they form the
+  full "consolidation state" story: beliefs enter raw, earn their
+  keep through evidence or structure, or eventually age out. Log-odds
+  decay (the Bayesian-principled alternative) is deferred to v0.1.
 - **README "Use with Claude Code" section** — walks through install
   (pipx preferred), dropping the slash commands into a target project,
   first-run verification, and the save → clear → resume flow with a

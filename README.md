@@ -152,6 +152,10 @@ bellamem render --out graph.svg                           # whole forest
 bellamem render --out disputes.svg --disputes-only        # just ⊥ edges
 bellamem render --out auth.svg --focus "auth tokens"      # subgraph around a focus
 
+# Forget orphan leaves that never earned their place (dry run by default)
+bellamem prune                        # preview candidates
+bellamem prune --apply                # actually remove them
+
 # One-time migrations
 bellamem scrub                     # remove system-noise beliefs from old snapshots
 bellamem emerge --llm              # merge near-duplicates + rename fields via cheap LLM
@@ -458,6 +462,64 @@ Over time, the distinction between working memory and long-term memory
 stops being a layer and becomes an emergent property of where a belief
 sits in this pipeline. Recent beliefs are raw because they haven't
 been processed yet; old beliefs are compressed because they have.
+
+---
+
+## Forgetting (`bellamem prune`)
+
+Accumulation without forgetting is a bug. Most of what gets said in a
+long coding session is assistant-voice exposition — real sentences
+about the work, but never revisited, never ratified, never disputed,
+never used as the parent of another claim. They enter the graph at
+base mass (0.53) and sit there forever unless something explicitly
+pulls them into structure. After enough sessions, a meaningful
+fraction of the graph is this kind of residue.
+
+`bellamem prune` removes it — but only under strict structural
+safety rails. A belief is a prune candidate **iff all of** the
+following hold:
+
+- It's a **leaf** (`children == []`) — nothing grew below it.
+- It's single-voice — only one source has ever ratified it.
+- It's in the **base-mass band** (0.48 ≤ mass ≤ 0.55) — Jaynes has
+  never moved it off the prior in either direction.
+- It's **not itself a ⊥ dispute or ⇒ cause** — rejected approaches
+  and causal predecessors are load-bearing memory, never pruned.
+- It has **no `mass_floor` pin** — pinned beliefs were deliberately
+  elevated by the caller.
+- It's in a **non-reserved field** — `__self__` and other system
+  fields are never touched.
+- It's been **untouched for at least `--age-days`** (default 30).
+- It was **created more than `--grace-days`** ago (default 14) —
+  brand-new beliefs always get a grace period.
+
+By construction, anything with structural ties — children, disputes,
+causes, multi-voice ratification, high mass, recent evidence — is
+safe. What's left is the residue: one-off assistant observations that
+nothing ever grabbed onto.
+
+```bash
+bellamem prune               # dry run, shows what would be removed
+bellamem prune --apply       # actually removes them, saves the snapshot
+bellamem prune --age-days 60 --max-voices 2  # looser criteria
+```
+
+Dry-run is the default. `--apply` is required to mutate. Like
+`emerge` and `scrub`, `prune` is a *consolidation* operation — it
+changes the graph, so it's explicit, not automatic.
+
+Pruning is **structural**, not **Bayesian**. The principled
+alternative — decaying `log_odds` toward zero over time so beliefs
+regress to the prior without reinforcement — is a v0.1 design
+question: it changes mass under your feet, makes `surprises` noisier,
+and needs a tuned half-life constant. Structural pruning solves the
+visible problem (residue accumulation) without touching the data
+model. The decay version will come when the theory demands it.
+
+`bellamem prune` complements `bellamem emerge`: **emerge merges
+duplicates**, **prune removes orphans**. Together they're the full
+consolidation pipeline. Beliefs enter raw, either earn their keep or
+age out, and the long-term graph stays a signal, not a transcript.
 
 ---
 
