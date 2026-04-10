@@ -24,7 +24,13 @@ from __future__ import annotations
 import json
 import os
 import re
-from typing import Iterable, Iterator
+from typing import Callable, Iterable, Iterator, Optional
+
+
+# How often `ingest_session` fires its progress callback, measured in
+# real turns processed. 500 is "often enough to show the process is
+# alive on a 10 MB file, not so often that the output log churns."
+PROGRESS_EVERY_N_TURNS = 500
 
 from ..core.bella import Bella
 
@@ -233,7 +239,9 @@ def iter_new_turns(bella: Bella, path: str,
 
 
 def ingest_session(bella: Bella, path: str, *, tail: int | None = None,
-                    no_llm: bool = False) -> dict:
+                    no_llm: bool = False,
+                    on_progress: Optional[Callable[[int, int], None]] = None,
+                    ) -> dict:
     """Ingest all new turns from a single transcript into bella.
 
     Regex EW (adapters.chat) runs first — it handles add/deny/rule/decision
@@ -245,6 +253,11 @@ def ingest_session(bella: Bella, path: str, *, tail: int | None = None,
     Turn-pair retroactive ratification (P10) runs against ALL claims
     from the preceding assistant turn — both regex-extracted and
     LLM-extracted — so a user affirmation boosts both equally.
+
+    Progress callback (`on_progress`) is called with (turns, claims)
+    every PROGRESS_EVERY_N_TURNS turns so the CLI can render intra-file
+    progress during long ingests. Not called if None. The callback
+    runs on the main thread and should be cheap (e.g. a print).
 
     Returns a small stats dict for the CLI to print.
     """
@@ -293,6 +306,9 @@ def ingest_session(bella: Bella, path: str, *, tail: int | None = None,
 
     for lineno, voice, text in iter_new_turns(bella, path, tail=tail):
         turns += 1
+
+        if on_progress is not None and turns % PROGRESS_EVERY_N_TURNS == 0:
+            on_progress(turns, claims_written)
 
         # 1) User turn: react to the preceding assistant turn first.
         if voice == "user" and assistant_pending:
@@ -361,7 +377,10 @@ def ingest_session(bella: Bella, path: str, *, tail: int | None = None,
 def ingest_project(bella: Bella, cwd: str | None = None,
                     *, tail: int | None = None,
                     no_llm: bool = False,
-                    latest_only: bool = False) -> Iterator[dict]:
+                    latest_only: bool = False,
+                    on_session_start: Optional[Callable[[str], None]] = None,
+                    on_progress: Optional[Callable[[int, int], None]] = None,
+                    ) -> Iterator[dict]:
     """Yield ingest results one session at a time.
 
     This is a generator rather than a list-returning function so CLI
@@ -371,14 +390,25 @@ def ingest_project(bella: Bella, cwd: str | None = None,
     same shape as before.
 
     Flags:
-      tail          — if set, limit each session to its last N turns
-      no_llm        — disable LLM-backed EW regardless of env
-      latest_only   — only ingest the most recent session (useful for
-                      first-run bounded ingests on large projects)
+      tail             — limit each session to its last N turns
+      no_llm           — disable LLM-backed EW regardless of env
+      latest_only      — only ingest the most recent session (the one
+                         whose file has the newest mtime)
+      on_session_start — optional callback fired with the session's
+                         basename before its ingest begins. Use to
+                         render a "starting session X" header.
+      on_progress      — optional callback forwarded to ingest_session;
+                         fires every PROGRESS_EVERY_N_TURNS turns with
+                         (turns_so_far, claims_so_far). Use to render
+                         intra-file progress on huge transcripts.
     """
     sessions = list_sessions(cwd)
     if latest_only and sessions:
-        # list_sessions returns sorted asc; take the last one
+        # list_sessions now returns sorted by mtime asc; take the last.
         sessions = [sessions[-1]]
     for path in sessions:
-        yield ingest_session(bella, path, tail=tail, no_llm=no_llm)
+        if on_session_start is not None:
+            on_session_start(os.path.basename(path))
+        yield ingest_session(
+            bella, path, tail=tail, no_llm=no_llm, on_progress=on_progress,
+        )

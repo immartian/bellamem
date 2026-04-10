@@ -79,6 +79,16 @@ def _format_session_result(r: dict) -> str:
     return line
 
 
+def _print_session_start(session_name: str) -> None:
+    """Callback: print a header line as each session's ingest begins."""
+    print(f"  {session_name}")
+
+
+def _print_session_progress(turns: int, claims: int) -> None:
+    """Callback: print intra-file progress during a long ingest."""
+    print(f"      ... {turns} turns, {claims} claims")
+
+
 def cmd_ingest_cc(args: argparse.Namespace) -> int:
     from .adapters.claude_code import ingest_project
     _setup_embedder()
@@ -97,12 +107,15 @@ def cmd_ingest_cc(args: argparse.Namespace) -> int:
     latest_only = not args.all_sessions
 
     # Stream each session's result as soon as ingest_session returns,
-    # not at the end of the batch. Keeps the terminal responsive on
-    # large first-run ingests.
+    # not at the end of the batch. Also print a header when each
+    # session starts and intra-file progress every N turns so huge
+    # transcripts don't look hung.
     results: list[dict] = []
     for r in ingest_project(
         bella, cwd=args.cwd,
         tail=args.tail, no_llm=args.no_llm, latest_only=latest_only,
+        on_session_start=_print_session_start,
+        on_progress=_print_session_progress,
     ):
         results.append(r)
         print(_format_session_result(r))
@@ -609,8 +622,9 @@ def cmd_save(args: argparse.Namespace) -> int:
     # --all-sessions flips to the old "every transcript" behaviour.
     latest_only = not args.all_sessions
 
-    # Stream per-session results so the user sees progress on long
-    # first-run ingests instead of staring at an empty output file.
+    # Stream per-session results + per-session start + intra-file
+    # progress every N turns so the user sees continuous activity
+    # instead of staring at the section header for ten minutes.
     results: list[dict] = []
     for r in ingest_project(
         bella,
@@ -618,6 +632,8 @@ def cmd_save(args: argparse.Namespace) -> int:
         tail=args.tail,
         no_llm=args.no_llm,
         latest_only=latest_only,
+        on_session_start=_print_session_start,
+        on_progress=_print_session_progress,
     ):
         results.append(r)
         print(_format_session_result(r))
