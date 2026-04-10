@@ -132,6 +132,21 @@ assumed a global `~/.bellamem/` snapshot and the bellamem repo's own
   `.venv/bin/bellamem` first, then `command -v bellamem`, fails loud
   with install instructions if neither is available.
 
+### Fixed
+
+- **`bellamem save` and long ingests now show progress in real time.**
+  Python's default stdout buffering is line-buffered for a TTY but
+  fully block-buffered (4-8 KB) for a pipe, which is how Claude Code
+  captures a background task's stdout. The result: a long first-run
+  ingest could write **zero bytes** of visible output for many minutes
+  while the process was grinding at 96% CPU, making it look like the
+  command was hung when it was actually making progress. Fixed by
+  calling `sys.stdout.reconfigure(line_buffering=True)` at the top of
+  `main()`, so every `print()` flushes on a newline regardless of
+  whether stdout is a TTY or a pipe. Caught during a real-user dogfood:
+  a first `/bellamem save` on a project with ~632 MB of transcripts
+  ran silently for 50 minutes before we diagnosed it.
+
 ### Removed
 
 - **`.claude/commands/bellamem-cmd.sh`** — the bash dispatcher that

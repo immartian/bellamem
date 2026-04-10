@@ -23,6 +23,7 @@
 from __future__ import annotations
 
 import argparse
+import io
 import os
 import sys
 
@@ -1134,6 +1135,17 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Line-buffer stdout so per-file / per-section prints appear in real
+    # time when our output is piped (e.g. captured by Claude Code's
+    # background task runner). Python's default for a pipe is full-buffer
+    # with a 4-8 KB block, which means a long-running ingest writes zero
+    # bytes of visible output until many lines accumulate — it looks hung
+    # even when it's grinding at 96% CPU. Reconfiguring here is cheap and
+    # only affects this process.
+    try:
+        sys.stdout.reconfigure(line_buffering=True)  # type: ignore[attr-defined]
+    except (AttributeError, io.UnsupportedOperation):
+        pass
     # Load .env from cwd if present. Explicit call, not on import.
     load_dotenv(".env")
     args = build_parser().parse_args(argv)
