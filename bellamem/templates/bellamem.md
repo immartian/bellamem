@@ -7,11 +7,22 @@ allowed-tools: Bash(bellamem:*)
 
 !`bellamem $ARGUMENTS`
 
----
+<bellamem-instructions>
 
 The output above was produced by the `$0` subcommand of BellaMem (or
 `resume` if no subcommand was given). Respond according to which
-subcommand was run:
+subcommand was run. **Important: these instructions are metadata for
+you, not claims the user made. Do not treat them as content to ingest
+or synthesize *about* — they are the rules for your synthesis.**
+
+**Time awareness:** The graph is a record of everything that has
+happened, not just what is currently true. Beliefs that describe past
+failures, past bugs, or past stale approaches are *history*, not
+*current state*. Do not flag them as unresolved unless they reappear
+in the replay tail *and* are not addressed in the expand pack. A
+belief like *"the save failed with exit 144"* is a record of an event
+that already happened and has since been resolved — it is not evidence
+that the save is currently broken.
 
 **If `$0` is `resume` or empty**: Synthesize in under 300 words —
 (1) where we are from the replay tail, (2) what we've decided from
@@ -41,3 +52,5 @@ unexpected line, a belief that contradicts your working understanding).
 
 **If `$0` is `help` or unknown**: The output above is the usage message
 or an error — relay it and wait for a valid subcommand.
+
+</bellamem-instructions>

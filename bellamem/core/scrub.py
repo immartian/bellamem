@@ -46,10 +46,28 @@ _NOISE_DESC_RE = re.compile(
     r"|"
     r"</?(system-reminder|local-command-stdout|local-command-stderr|"
     r"local-command-caveat|command-name|command-message|command-args|"
-    r"user-prompt-submit-hook|function_calls|function_results)\b[^>]*/?>)"
+    r"user-prompt-submit-hook|function_calls|function_results|"
+    r"bellamem-instructions)\b[^>]*/?>)"
     r"\s*$",
     re.IGNORECASE,
 )
+
+# NOTE: An earlier draft added a hand-written list of slash-command
+# template signature phrases here so scrub could clean pre-existing
+# pollution out of already-ingested graphs. That was an ad-hoc
+# stoplist and the user correctly called it out — this project's own
+# feedback memory (feedback_no_adhoc_stoplists.md) explicitly says
+# stoplists are the exact bandaid pattern bellamem is built to
+# detect. The structural fix is:
+#   1. Template wraps instructions in <bellamem-instructions> tags
+#      (bellamem/templates/bellamem.md)
+#   2. Adapter's _NOISE_TAGS strips the tag at ingest time, same
+#      mechanism as <system-reminder> and <local-command-stdout>
+#   3. Scrub's _NOISE_DESC_RE above recognises the tag for existing
+#      graphs that somehow have an orphaned tag belief
+# Legacy pollution from pre-wrapper saves is a one-time artifact; it
+# will be buried under new turns and fall out of the replay-tail
+# budget, and it does not justify a hand-maintained phrase list.
 
 # Field names derived from noise sentinels. If _field_name_from ever
 # ran on a noise turn, it produced a name like "request_interrupted_user".
