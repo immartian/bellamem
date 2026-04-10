@@ -5,12 +5,13 @@ allowed-tools: Bash(bellamem:*)
 
 # /bellamem $ARGUMENTS
 
-!`bash -c 'sub="${1:-resume}"; shift 2>/dev/null || true; case "$sub" in resume) bellamem resume ;; save) bellamem save ;; recall) bellamem expand "$*" -t 1500 ;; why) bellamem before-edit "$*" -t 1500 ;; replay) bellamem replay -t 2500 ;; audit) bellamem audit ;; help|--help|-h|"") printf "%s\n" "/bellamem — BellaMem graph memory" "" "Subcommands:" "  resume              working memory + long-term memory + signal (default)" "  save                ingest current session + audit + surprises" "  recall <topic>      mass-ranked beliefs about a topic" "  why <topic>         causal chain + invariants + disputes for a focus" "  replay              raw session replay (line-ordered)" "  audit               full entropy audit" "  help                show this message" ;; *) echo "unknown subcommand: $sub" >&2; echo "try: /bellamem help" >&2; exit 1 ;; esac' _ $ARGUMENTS`
+!`bellamem $ARGUMENTS`
 
 ---
 
-The output above was produced by the `$0` subcommand of BellaMem. Respond
-according to which subcommand was run:
+The output above was produced by the `$0` subcommand of BellaMem (or
+`resume` if no subcommand was given). Respond according to which
+subcommand was run:
 
 **If `$0` is `resume` or empty**: Synthesize in under 300 words —
 (1) where we are from the replay tail, (2) what we've decided from

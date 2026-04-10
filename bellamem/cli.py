@@ -471,6 +471,37 @@ def cmd_migrate(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_recall(args: argparse.Namespace) -> int:
+    """Alias for `bellamem expand` with the slash-command default budget.
+
+    `bellamem recall "what did we decide about auth?"` is identical to
+    `bellamem expand "what did we decide about auth?" -t 1500`. Exists
+    so the /bellamem slash command can call `bellamem recall` directly
+    without going through a shell dispatcher.
+    """
+    recall_args = argparse.Namespace(
+        snapshot=args.snapshot,
+        focus=args.topic,
+        budget=args.budget,
+    )
+    return cmd_expand(recall_args)
+
+
+def cmd_why(args: argparse.Namespace) -> int:
+    """Alias for `bellamem before-edit` with the slash-command default budget.
+
+    `bellamem why "the forgetting mechanism"` is identical to
+    `bellamem before-edit "the forgetting mechanism" -t 1500`.
+    """
+    why_args = argparse.Namespace(
+        snapshot=args.snapshot,
+        focus=args.topic,
+        entity=None,
+        budget=args.budget,
+    )
+    return cmd_before_edit(why_args)
+
+
 def cmd_resume(args: argparse.Namespace) -> int:
     """Composite working-memory pack for session start.
 
@@ -848,7 +879,10 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="bellamem",
                                  description="local accumulating memory for LLM agents")
     p.add_argument("--snapshot", help="snapshot path (default: <project>/.graph/default.json)")
-    sub = p.add_subparsers(dest="cmd", required=True)
+    # The subcommand is optional — `bellamem` with no args routes to
+    # `bellamem resume`. This lets the Claude Code slash command pass
+    # a (possibly empty) $ARGUMENTS through without a shell dispatcher.
+    sub = p.add_subparsers(dest="cmd", required=False)
 
     sp = sub.add_parser("ingest-cc", help="ingest Claude Code .jsonl transcripts")
     sp.add_argument("--cwd", help="project cwd (defaults to current working dir)")
@@ -889,6 +923,36 @@ def build_parser() -> argparse.ArgumentParser:
     sp.set_defaults(func=cmd_migrate)
 
     # --- composite commands for slash-command flow ---------------------------
+
+    sp = sub.add_parser(
+        "recall",
+        help="alias: mass-ranked beliefs about a topic (wraps `expand`)",
+    )
+    sp.add_argument("topic", nargs="+", help="topic description")
+    sp.add_argument("-t", "--budget", type=int, default=1500,
+                    help="token budget (default 1500)")
+    sp.set_defaults(func=lambda args: cmd_recall(
+        argparse.Namespace(
+            snapshot=args.snapshot,
+            topic=" ".join(args.topic),
+            budget=args.budget,
+        )
+    ))
+
+    sp = sub.add_parser(
+        "why",
+        help="alias: pre-edit pack (wraps `before-edit`)",
+    )
+    sp.add_argument("topic", nargs="+", help="focus description")
+    sp.add_argument("-t", "--budget", type=int, default=1500,
+                    help="token budget (default 1500)")
+    sp.set_defaults(func=lambda args: cmd_why(
+        argparse.Namespace(
+            snapshot=args.snapshot,
+            topic=" ".join(args.topic),
+            budget=args.budget,
+        )
+    ))
 
     sp = sub.add_parser(
         "resume",
@@ -1073,6 +1137,15 @@ def main(argv: list[str] | None = None) -> int:
     # Load .env from cwd if present. Explicit call, not on import.
     load_dotenv(".env")
     args = build_parser().parse_args(argv)
+    # No subcommand → implicit `resume`. Fill in the resume defaults
+    # so cmd_resume can read them off args the same way it would if
+    # the user had typed `bellamem resume` explicitly.
+    if args.cmd is None:
+        args.focus = "current state and open follow-ups"
+        args.replay_budget = 2500
+        args.expand_budget = 1500
+        args.surprise_top = 8
+        return cmd_resume(args)
     return args.func(args)
 
 

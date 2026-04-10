@@ -20,7 +20,7 @@ import pytest
 
 from bellamem.core import Bella, Claim, save
 from bellamem.core.embed import HashEmbedder, set_embedder
-from bellamem.cli import cmd_install_commands, cmd_resume
+from bellamem.cli import build_parser, cmd_install_commands, cmd_resume, main
 
 
 def _populated_snapshot(tmp_path: Path) -> Path:
@@ -45,10 +45,12 @@ def test_template_is_bundled_and_readable():
     template = files("bellamem.templates").joinpath("bellamem.md").read_text()
     assert "description:" in template
     assert "/bellamem" in template
-    assert "bellamem resume" in template
-    assert "bellamem save" in template
+    # New-style template: a single bellamem $ARGUMENTS call, no shell dispatcher.
+    assert "!`bellamem $ARGUMENTS`" in template
+    # allowed-tools must match the actual first executable for the
+    # Claude Code permission check to auto-approve.
+    assert "allowed-tools: Bash(bellamem:*)" in template
     # Post-instructions block must be present for Claude to synthesize.
-    # The phrase is line-wrapped in the template, so match it loosely.
     assert "subcommand of BellaMem" in template
     assert "Synthesize in under 300 words" in template
 
@@ -70,7 +72,7 @@ def test_install_commands_project_writes_file(tmp_path: Path, monkeypatch):
     target = tmp_path / ".claude" / "commands" / "bellamem.md"
     assert target.exists()
     content = target.read_text()
-    assert "bellamem resume" in content
+    assert "!`bellamem $ARGUMENTS`" in content
 
 
 def test_install_commands_refuses_overwrite(tmp_path: Path, monkeypatch, capsys):
@@ -91,7 +93,7 @@ def test_install_commands_force_overwrites(tmp_path: Path, monkeypatch):
     target.write_text("stale content")
     rc = cmd_install_commands(_install_args(project=True, force=True))
     assert rc == 0
-    assert "bellamem resume" in target.read_text()
+    assert "!`bellamem $ARGUMENTS`" in target.read_text()
 
 
 def test_install_commands_dry_run_does_not_write(tmp_path: Path, monkeypatch, capsys):
@@ -152,3 +154,46 @@ def test_cmd_resume_on_empty_memory_returns_error(tmp_path: Path, capsys):
     assert rc == 1
     err = capsys.readouterr().err
     assert "empty memory" in err
+
+
+# ---------------------------------------------------------------------------
+# Argparse shape: recall/why aliases and bare-resume default
+# ---------------------------------------------------------------------------
+
+
+def test_parser_accepts_bare_invocation():
+    """`bellamem` with no subcommand parses to cmd=None (main() handles it)."""
+    parser = build_parser()
+    args = parser.parse_args([])
+    assert args.cmd is None
+
+
+def test_parser_accepts_recall_alias():
+    parser = build_parser()
+    args = parser.parse_args(["recall", "the", "forgetting", "mechanism"])
+    assert args.cmd == "recall"
+    assert args.topic == ["the", "forgetting", "mechanism"]
+    assert args.budget == 1500
+
+
+def test_parser_accepts_why_alias():
+    parser = build_parser()
+    args = parser.parse_args(["why", "the", "slash", "dispatcher"])
+    assert args.cmd == "why"
+    assert args.topic == ["the", "slash", "dispatcher"]
+    assert args.budget == 1500
+
+
+def test_main_routes_bare_invocation_to_resume(tmp_path: Path, monkeypatch, capsys):
+    """main() with no argv should run cmd_resume against the resolved snapshot."""
+    # Force the hash embedder regardless of what the user's .env says —
+    # the populated snapshot fixture uses HashEmbedder, so loading it
+    # with a different embedder would trip the signature check.
+    monkeypatch.setenv("BELLAMEM_EMBEDDER", "hash")
+    monkeypatch.delenv("BELLAMEM_EMBEDDER_MODEL", raising=False)
+    snap = _populated_snapshot(tmp_path)
+    monkeypatch.setenv("BELLAMEM_SNAPSHOT", str(snap))
+    rc = main([])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "## Working memory (replay tail)" in out
