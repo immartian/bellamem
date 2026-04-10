@@ -15,6 +15,9 @@
     bellamem migrate                  ~/.bellamem/ → <project>/.graph/
     bellamem render                   graphviz diagram of the belief forest
     bellamem prune                    remove orphan leaves (structural forgetting)
+    bellamem resume                   session start pack (working + long-term + signal)
+    bellamem save                     session end: ingest + audit + surprises
+    bellamem install-commands         install /bellamem slash command into Claude Code
 """
 
 from __future__ import annotations
@@ -468,6 +471,200 @@ def cmd_migrate(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_resume(args: argparse.Namespace) -> int:
+    """Composite working-memory pack for session start.
+
+    Prints three sections to stdout:
+      1. Working memory — replay tail of the most recent session
+      2. Long-term memory — expand pack over the focus
+      3. Signal — top surprises
+
+    Replaces the shell dispatcher's `resume` subcommand. The section
+    headers match what the slash command post-processing expects.
+    """
+    _setup_embedder()
+    snap = _resolve_snapshot(args.snapshot)
+    try:
+        bella = load(snap)
+    except EmbedderMismatch as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 3
+    if not bella.fields:
+        print("empty memory — run `bellamem save` or `bellamem ingest-cc` first",
+              file=sys.stderr)
+        return 1
+
+    # Section 1: working memory (replay tail)
+    print("## Working memory (replay tail)")
+    print()
+    replay_result = replay(
+        bella,
+        focus=None,
+        session=None,
+        since_line=None,
+        budget_tokens=args.replay_budget,
+    )
+    if replay_result.session_key is None:
+        print("(no source-grounded beliefs yet — re-ingest to populate sources)")
+    else:
+        print(replay_result.text())
+        print()
+        shown = len(replay_result.entries)
+        total = replay_result.total_candidates
+        suffix = ""
+        if shown < total:
+            suffix = f" (tail-preserved {shown}/{total}, budget={args.replay_budget}t)"
+        print(f"— {shown} entries{suffix}, ~{replay_result.used_tokens()}t —")
+
+    print()
+    print("## Long-term memory (ratified decisions, current focus)")
+    print()
+    pack = expand(bella, args.focus, budget_tokens=args.expand_budget)
+    print(pack.text())
+    print()
+    print(f"— {len(pack.lines)} lines, ~{pack.used_tokens()}t / {args.expand_budget}t budget —")
+
+    print()
+    print("## What just mattered (surprises)")
+    print()
+    report = compute_surprises(bella, top_n=args.surprise_top)
+    print(render_surprise_report(report, max_per_section=args.surprise_top))
+
+    return 0
+
+
+def cmd_save(args: argparse.Namespace) -> int:
+    """Composite ingest + audit + surprises for session save.
+
+    Replaces the shell dispatcher's `save` subcommand. Runs the same
+    pipeline the low-level `ingest-cc` runs (with auto-emerge) and
+    then prints an audit report and top surprises in the same
+    section layout the slash command expects.
+    """
+    from .adapters.claude_code import ingest_project
+
+    _setup_embedder()
+    snap = _resolve_snapshot(args.snapshot)
+    try:
+        bella = load(snap)
+    except EmbedderMismatch as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 3
+
+    # Section 1: ingest with auto-consolidation
+    print("## Ingest with auto-consolidation")
+    print()
+    before = sum(len(g.beliefs) for g in bella.fields.values())
+    results = ingest_project(
+        bella,
+        cwd=args.cwd,
+        tail=args.tail,
+        no_llm=args.no_llm,
+        latest_only=args.latest_only,
+    )
+    after_ingest = sum(len(g.beliefs) for g in bella.fields.values())
+
+    merged = 0
+    if not args.no_emerge and results:
+        emerge_report = emerge(bella)
+        merged = len(emerge_report.merges)
+
+    save(bella, snap)
+    after = sum(len(g.beliefs) for g in bella.fields.values())
+
+    if not results:
+        print(f"no Claude Code transcripts found for cwd={args.cwd or os.getcwd()}")
+        return 1
+    for r in results:
+        line = f"  {r['session']}: +{r['turns']} turns → +{r['claims']} claims"
+        if r.get("affirmed") or r.get("corrected"):
+            line += f"  (affirmed:{r.get('affirmed', 0)} corrected:{r.get('corrected', 0)})"
+        if r.get("causes") or r.get("self_obs"):
+            line += f"  (causes:{r.get('causes', 0)} self_obs:{r.get('self_obs', 0)})"
+        print(line)
+    if merged:
+        print(f"emerge (auto): merged {merged} near-duplicate pair(s)")
+    print(
+        f"beliefs: {before} → {after_ingest} → {after}"
+        f"  (+{after_ingest - before} ingested, -{after_ingest - after} merged)"
+    )
+    print(f"snapshot: {snap}")
+
+    # Section 2: audit
+    print()
+    print("## Audit")
+    print()
+    audit_report = audit(bella, top_n=args.audit_top)
+    print(render_report(audit_report, max_per_section=args.audit_max_per_section))
+
+    # Section 3: top surprises after ingest
+    print()
+    print("## Top surprises after ingest")
+    print()
+    surprise_report = compute_surprises(bella, top_n=args.surprise_top)
+    print(render_surprise_report(surprise_report, max_per_section=args.surprise_top))
+
+    return 0
+
+
+def cmd_install_commands(args: argparse.Namespace) -> int:
+    """Install the BellaMem Claude Code slash command into a commands dir.
+
+    Default destination is `~/.claude/commands/bellamem.md` (global, works
+    in every project). `--project` switches to `./.claude/commands/` for a
+    per-project install. `--dry-run` prints the target without writing;
+    `--force` overwrites an existing file.
+    """
+    from pathlib import Path
+
+    try:
+        from importlib.resources import files  # type: ignore
+    except ImportError:  # pragma: no cover
+        print("error: importlib.resources not available (needs Python 3.9+)",
+              file=sys.stderr)
+        return 2
+
+    try:
+        template = files("bellamem.templates").joinpath("bellamem.md").read_text()
+    except (FileNotFoundError, ModuleNotFoundError) as e:
+        print(f"error: could not read bundled template: {e}", file=sys.stderr)
+        print("hint: is bellamem installed? try `pip install -e .`", file=sys.stderr)
+        return 2
+
+    if args.project:
+        target_dir = Path.cwd() / ".claude" / "commands"
+        scope = "project"
+    else:
+        target_dir = Path.home() / ".claude" / "commands"
+        scope = "global"
+    target = target_dir / "bellamem.md"
+
+    if args.dry_run:
+        print(f"would install ({scope}): {target}")
+        print(f"template size: {len(template)} bytes")
+        if target.exists() and not args.force:
+            print(f"(target exists — would need --force to overwrite)")
+        return 0
+
+    if target.exists() and not args.force:
+        print(f"error: {target} already exists. Pass --force to overwrite.",
+              file=sys.stderr)
+        return 1
+
+    target_dir.mkdir(parents=True, exist_ok=True)
+    target.write_text(template)
+    print(f"installed ({scope}): {target}")
+    print()
+    print("you can now use /bellamem in Claude Code:")
+    print("  /bellamem           — resume: working memory + long-term memory + signal")
+    print("  /bellamem save      — ingest current session + audit + surprises")
+    print("  /bellamem recall X  — mass-ranked beliefs about X")
+    print("  /bellamem why X     — pre-edit pack: invariants, disputes, causes")
+    print("  /bellamem replay    — narrative timeline")
+    print("  /bellamem audit     — entropy signals")
+    return 0
+
+
 def cmd_prune(args: argparse.Namespace) -> int:
     """Structural forgetting: remove leaf beliefs that never earned their place.
 
@@ -690,6 +887,59 @@ def build_parser() -> argparse.ArgumentParser:
         help="copy legacy ~/.bellamem/ runtime state into <project>/.graph/",
     )
     sp.set_defaults(func=cmd_migrate)
+
+    # --- composite commands for slash-command flow ---------------------------
+
+    sp = sub.add_parser(
+        "resume",
+        help="session start: working memory + long-term memory + signal",
+    )
+    sp.add_argument("--focus", default="current state and open follow-ups",
+                    help="focus string for the expand pack "
+                         "(default: 'current state and open follow-ups')")
+    sp.add_argument("--replay-budget", type=int, default=2500,
+                    help="token budget for the replay tail (default 2500)")
+    sp.add_argument("--expand-budget", type=int, default=1500,
+                    help="token budget for the expand pack (default 1500)")
+    sp.add_argument("--surprise-top", type=int, default=8,
+                    help="number of surprise rows per section (default 8)")
+    sp.set_defaults(func=cmd_resume)
+
+    sp = sub.add_parser(
+        "save",
+        help="session end: ingest current session + auto-emerge + audit + surprises",
+    )
+    sp.add_argument("--cwd",
+                    help="project cwd (defaults to current working dir)")
+    sp.add_argument("--tail", type=int, default=None,
+                    help="limit each session to its last N turns")
+    sp.add_argument("--no-llm", action="store_true",
+                    help="disable LLM-backed EW regardless of BELLAMEM_EW")
+    sp.add_argument("--latest-only", action="store_true",
+                    help="only ingest the most recent session")
+    sp.add_argument("--no-emerge", action="store_true",
+                    help="skip R3 auto-consolidation at end of ingest")
+    sp.add_argument("--audit-top", type=int, default=10,
+                    help="rows per audit section (default 10)")
+    sp.add_argument("--audit-max-per-section", type=int, default=3,
+                    help="max rows rendered per audit section (default 3)")
+    sp.add_argument("--surprise-top", type=int, default=5,
+                    help="number of surprise rows per section (default 5)")
+    sp.set_defaults(func=cmd_save)
+
+    sp = sub.add_parser(
+        "install-commands",
+        help="install the /bellamem Claude Code slash command "
+             "(default: global at ~/.claude/commands/)",
+    )
+    sp.add_argument("--project", action="store_true",
+                    help="install into ./.claude/commands/ instead of "
+                         "~/.claude/commands/")
+    sp.add_argument("--force", action="store_true",
+                    help="overwrite an existing bellamem.md")
+    sp.add_argument("--dry-run", action="store_true",
+                    help="print the target path without writing")
+    sp.set_defaults(func=cmd_install_commands)
 
     sp = sub.add_parser(
         "prune",

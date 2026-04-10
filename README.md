@@ -211,20 +211,31 @@ commands** that ship with BellaMem. They package the `/save` → `/clear`
 → `/resume` pattern into four friendly entry points so you never have
 to remember a CLI invocation mid-session.
 
-### Drop the commands into your project
+### Install the slash command — once, globally
 
 ```bash
-# From the bellamem checkout (or from any released tarball):
-mkdir -p <your-project>/.claude/commands
-cp .claude/commands/bellamem.md        <your-project>/.claude/commands/
-cp .claude/commands/bellamem-cmd.sh    <your-project>/.claude/commands/
-chmod +x <your-project>/.claude/commands/bellamem-cmd.sh
+bellamem install-commands           # writes ~/.claude/commands/bellamem.md
 ```
 
-The dispatcher auto-detects your install style: if the project has a
-`.venv/bin/bellamem`, it uses that; otherwise it falls back to whatever
-`bellamem` is on `$PATH` (pipx, user install, system package). No
-config needed.
+That's it. `/bellamem` now works in **every** Claude Code project on
+your machine, because `~/.claude/commands/` is user-level (as opposed
+to project-level at `.claude/commands/`). The installed command is a
+single self-contained markdown file that calls the `bellamem` CLI —
+no shell dispatcher, no per-project copies to maintain.
+
+Want it per-project instead (e.g. to commit the slash command into a
+repo)?
+
+```bash
+bellamem install-commands --project     # writes ./.claude/commands/bellamem.md
+bellamem install-commands --dry-run     # show the target path without writing
+bellamem install-commands --force       # overwrite an existing file
+```
+
+The command assumes `bellamem` is on your `$PATH`. The recommended
+path is `pipx install bellamem` (see [Install](#install)), but any
+method that puts `bellamem` on `$PATH` works — project-local venvs,
+system packages, user installs.
 
 ### The four commands
 
@@ -238,15 +249,16 @@ config needed.
 
 ### First run
 
-In a fresh Claude Code session inside the project:
+In a fresh Claude Code session inside any project:
 
 ```
 /bellamem help
 ```
 
-You should see the usage message. If you get `error: bellamem not
-found`, re-check the install step above — the dispatcher tells you
-exactly which install paths it looked at.
+You should see the usage message. If you get `command not found:
+bellamem`, the slash command was installed correctly but the `bellamem`
+CLI itself isn't on your `$PATH`. Fix with `pipx install bellamem` or
+activate the venv that has it installed.
 
 ### The save → clear → resume flow
 
@@ -268,15 +280,14 @@ needs `bellamem emerge` to consolidate near-duplicates.
 ### Where your data lives
 
 ```
+~/.claude/commands/
+  bellamem.md            installed once (global slash command)
+
 <your-project>/
   .graph/
     default.json          belief graph (gitignored by default)
     embed_cache.json      embedding cache (if BELLAMEM_EMBEDDER ≠ hash)
     llm_ew_cache.json     LLM EW cache (if BELLAMEM_EW=hybrid)
-  .claude/
-    commands/
-      bellamem.md
-      bellamem-cmd.sh
   .env                    your API keys + embedder choice (never commit)
 ```
 

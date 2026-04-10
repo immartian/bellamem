@@ -67,4 +67,4 @@ bellamem = "bellamem.cli:main"
 include = ["bellamem*"]
 
 [tool.setuptools.package-data]
-bellamem = ["principles/*.md"]
+bellamem = ["principles/*.md", "templates/*.md"]

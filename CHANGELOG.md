@@ -63,6 +63,20 @@ assumed a global `~/.bellamem/` snapshot and the bellamem repo's own
   for direct rasterization; without it, `bellamem render` writes a
   `.dot` source file and tells you how to render it with the system
   `dot` command.
+- **`bellamem resume`** and **`bellamem save`** — composite CLI
+  commands that replace the old shell dispatcher. `resume` prints
+  working memory (replay tail) + long-term memory (expand pack) +
+  signal (top surprises) in one call. `save` runs ingest-cc +
+  auto-emerge + audit + surprises. Both write the same section
+  headers the slash command post-processing expects, so the
+  synthesize-according-to-subcommand flow is unchanged — only the
+  dispatch mechanism has moved from bash into Python.
+- **`bellamem install-commands`** — install the `/bellamem` Claude
+  Code slash command. Default destination is `~/.claude/commands/`
+  (global, works in every project). `--project` switches to
+  `./.claude/commands/` for per-project install. `--dry-run` and
+  `--force` available. Reads the template from packaged data via
+  `importlib.resources` so `pipx install bellamem` carries it along.
 - **`bellamem prune`** — structural forgetting: remove leaf beliefs
   that never earned their place. A belief is a prune candidate iff
   it's a leaf (no children), single-voice (`n_voices == 1`), in the
@@ -98,6 +112,16 @@ assumed a global `~/.bellamem/` snapshot and the bellamem repo's own
 - **`bellamem-cmd.sh` dispatcher** auto-detects install style — tries
   `.venv/bin/bellamem` first, then `command -v bellamem`, fails loud
   with install instructions if neither is available.
+
+### Removed
+
+- **`.claude/commands/bellamem-cmd.sh`** — the bash dispatcher that
+  the first `/bellamem` slash command relied on is gone. Composition
+  logic moved into `bellamem resume` and `bellamem save`, so the
+  slash command is now a single pure-markdown file (shipped as
+  package data and installed via `bellamem install-commands`). No
+  more two-file per-project install, no more `chmod +x`, no more
+  shell-script PATH-resolution edge cases.
 
 ### Deprecated
 
