@@ -639,9 +639,10 @@ def cmd_save(args: argparse.Namespace) -> int:
         print(_format_session_result(r))
 
     after_ingest = sum(len(g.beliefs) for g in bella.fields.values())
+    ingested = after_ingest - before
 
     merged = 0
-    if not args.no_emerge and results:
+    if not args.no_emerge and ingested > 0:
         emerge_report = emerge(bella)
         merged = len(emerge_report.merges)
 
@@ -651,11 +652,27 @@ def cmd_save(args: argparse.Namespace) -> int:
     if not results:
         print(f"no Claude Code transcripts found for cwd={args.cwd or os.getcwd()}")
         return 1
+
+    # Short-circuit the expensive audit + surprises phases when ingest
+    # produced no new data. A "save" run on an unchanged graph should
+    # not spend minutes recomputing an audit whose output is identical
+    # to the previous save's. The snapshot gets written regardless so
+    # any cursor updates still persist. Pass `--force-audit` if you
+    # explicitly want the full audit+surprises report on an unchanged
+    # graph (e.g. to re-check entropy signals without adding content).
+    if ingested == 0 and merged == 0 and not getattr(args, "force_audit", False):
+        print(f"beliefs: {after} (no new content since last save)")
+        print(f"snapshot: {snap}")
+        print()
+        print("nothing new to audit — `bellamem save --force-audit` to re-run "
+              "audit + surprises anyway.")
+        return 0
+
     if merged:
         print(f"emerge (auto): merged {merged} near-duplicate pair(s)")
     print(
         f"beliefs: {before} → {after_ingest} → {after}"
-        f"  (+{after_ingest - before} ingested, -{after_ingest - after} merged)"
+        f"  (+{ingested} ingested, -{after_ingest - after} merged)"
     )
     print(f"snapshot: {snap}")
 
@@ -1035,6 +1052,9 @@ def build_parser() -> argparse.ArgumentParser:
                          "only' so this flag is redundant)")
     sp.add_argument("--no-emerge", action="store_true",
                     help="skip R3 auto-consolidation at end of ingest")
+    sp.add_argument("--force-audit", action="store_true",
+                    help="run audit + surprises even if ingest produced "
+                         "nothing new (default: skip them on empty ingests)")
     sp.add_argument("--audit-top", type=int, default=10,
                     help="rows per audit section (default 10)")
     sp.add_argument("--audit-max-per-section", type=int, default=3,
