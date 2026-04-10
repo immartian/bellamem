@@ -15,10 +15,21 @@ set -e
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || (cd "$(dirname "$0")/../.." && pwd))"
 cd "$REPO_ROOT"
 
-BM=".venv/bin/bellamem"
-if [[ ! -x "$BM" ]]; then
-    echo "error: $BM not found at $REPO_ROOT" >&2
-    echo "install with: python3 -m venv .venv && .venv/bin/pip install -e ." >&2
+# Prefer a project-local editable install; fall back to PATH bellamem
+# (pipx, user install, system package). Fail loud if neither exists.
+if [[ -x ".venv/bin/bellamem" ]]; then
+    BM=".venv/bin/bellamem"
+elif command -v bellamem >/dev/null 2>&1; then
+    BM="$(command -v bellamem)"
+else
+    cat >&2 <<'EOF'
+error: bellamem not found.
+
+install one of:
+  • project-local venv:  python3 -m venv .venv && .venv/bin/pip install bellamem
+  • global (recommended): pipx install bellamem
+  • from source:         git clone https://github.com/immartian/bellamem && cd bellamem && pipx install -e .
+EOF
     exit 1
 fi
 

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "bellamem"
-version = "0.0.2"
+version = "0.0.3rc1"
 description = "A persistent, structured memory for LLM coding agents. Solves the context window problem — retrieves decisive context for each edit under a small token budget, measurably beating flat recency, LLM compact, and classic RAG."
 readme = "README.md"
 license = { text = "MIT" }
@@ -44,7 +44,13 @@ dependencies = []
 st = ["sentence-transformers>=2.2"]
 openai = ["openai>=1.0"]
 tokens = ["tiktoken>=0.6"]
-all = ["sentence-transformers>=2.2", "openai>=1.0", "tiktoken>=0.6"]
+viz = ["graphviz>=0.20"]
+all = [
+    "sentence-transformers>=2.2",
+    "openai>=1.0",
+    "tiktoken>=0.6",
+    "graphviz>=0.20",
+]
 test = ["pytest>=7.0"]
 
 [project.urls]

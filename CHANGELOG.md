@@ -4,6 +4,112 @@ All notable changes will be documented in this file. This project aims
 for [Semantic Versioning](https://semver.org). Until v1.0, everything
 is subject to change.
 
+## [0.0.3rc1] — 2026-04-09 — graph memory, per-project state, slash commands
+
+First **release candidate**. v0.0.3 is the first version where bellamem
+is comfortable being installed into other projects — previous versions
+assumed a global `~/.bellamem/` snapshot and the bellamem repo's own
+`.venv`. This RC cleans up both.
+
+### Added
+
+- **Per-project graph at `<project>/.graph/default.json`.** Each git
+  repo gets its own belief graph — no more cross-project contamination.
+  The embed cache and LLM EW cache move alongside the snapshot. All
+  three paths still honor `BELLAMEM_SNAPSHOT`, `BELLAMEM_EMBEDDER_CACHE_PATH`,
+  and `BELLAMEM_EW_LLM_CACHE_PATH` overrides.
+- **`bellamem migrate`** — one-shot command that copies legacy
+  `~/.bellamem/` state into the current project's `.graph/`. Copies
+  rather than moves, so the legacy files stay in place until you've
+  verified the migration. Safe to re-run.
+- **`bellamem/paths.py`** — leaf utility that centralizes runtime-state
+  path resolution. Used by both core and adapters; imports only stdlib.
+- **Slash command layer** (`.claude/commands/bellamem.md` +
+  `bellamem-cmd.sh`) — `/bellamem`, `/bellamem save`, `/bellamem recall`,
+  `/bellamem why`, `/bellamem replay`, `/bellamem audit`, `/bellamem help`.
+  The dispatcher auto-detects `.venv/bin/bellamem` or falls back to
+  whatever `bellamem` is on `$PATH` (pipx, user install, system).
+- **`bellamem replay`** — narrative timeline retrieval. Returns beliefs
+  from the latest session in source-line order, tail-preserving under
+  tight budgets. Complements `expand` (mass-weighted) and `surprises`
+  (signal).
+- **`bellamem surprises`** — top Jaynes step surprises weighted by prior
+  uncertainty, sign flips (beliefs that crossed 0.5), and recent ⊥ edge
+  formations. The "what just mattered?" signal.
+- **`bellamem emerge`** — R3 consolidation: near-duplicate merge (cosine
+  ≥ 0.92 in the same field) + field rename from content. Auto-runs at
+  the end of each `ingest-cc` unless `--no-emerge` is passed. `--llm`
+  flag optionally uses gpt-4o-mini to name fields the contrastive-rate
+  baseline can't disambiguate.
+- **`bellamem scrub`** — one-time migration that removes system-noise
+  beliefs (interrupt sentinels, command echoes) from pre-filter
+  snapshots.
+- **Provenance (`sources`) on every belief** — `(session_key, line_number)`
+  list populated by the Claude Code adapter at ingest time. Retroactive
+  ratification stamps the user's line, not the assistant's. Preserves
+  full evidence trail across merges (source lists are unioned).
+- **Audit entropy signals** — `bellamem audit` now reports bandaid
+  piles (R2), root glut (fields where most beliefs are unconnected),
+  near-duplicate pairs (R3 merge candidates), mass limbo (decisions
+  stuck at 0.45–0.55), garbage auto-generated field names, and the
+  multi-voice ratified / top-disputes summaries.
+- **`bellamem render`** — graphviz-backed visualization of the belief
+  forest. Filters: `--focus` + `--depth` for subgraph BFS, `--field`,
+  `--disputes-only`, `--min-mass`, `--max-nodes`. Output format is
+  inferred from the `--out` extension (.svg/.png/.pdf/.dot). Visual
+  encoding: node border width + label size ~ mass, node fill ~ field,
+  edge styles encode → support, ⊥ dispute (red dashed), ⇒ cause
+  (blue). Requires the `[viz]` extra (`pip install bellamem[viz]`)
+  for direct rasterization; without it, `bellamem render` writes a
+  `.dot` source file and tells you how to render it with the system
+  `dot` command.
+- **README "Use with Claude Code" section** — walks through install
+  (pipx preferred), dropping the slash commands into a target project,
+  first-run verification, and the save → clear → resume flow with a
+  30k-token reference point.
+- **Embedded graph rendering in the README** — `docs/bellamem-disputes.svg`
+  is BellaMem's own ⊥ dispute structure, rendered directly from the
+  live snapshot. Shows the rejected-approaches graph that `/compact`
+  fundamentally cannot preserve.
+- **`.graph/` entry in `.gitignore`** — the per-project snapshot is
+  gitignored by default. Remove the line if you want to commit your
+  graph.
+
+### Changed
+
+- **Install guidance.** README now leads with `pipx install bellamem`
+  as the recommended path. Per-project venv and editable installs
+  still documented as alternatives.
+- **`--snapshot` help text** and `.env.example` updated to reflect
+  `<project>/.graph/default.json` as the default.
+- **`bellamem-cmd.sh` dispatcher** auto-detects install style — tries
+  `.venv/bin/bellamem` first, then `command -v bellamem`, fails loud
+  with install instructions if neither is available.
+
+### Deprecated
+
+- **`~/.bellamem/` runtime state.** Legacy paths still work as a
+  read-fallback when no `.graph/` exists, with a one-time deprecation
+  warning per file. Run `bellamem migrate` to transition.
+
+### Why this matters
+
+v0.0.2 proved the graph-memory-for-agentic-coding idea could carry its
+own weight on one project. v0.0.3 is the work that lets it travel:
+per-project state so two repos don't contaminate each other, slash
+commands so users don't need to remember CLI invocations during a
+session, and an install story that doesn't assume you're developing
+bellamem itself. The data model, bench numbers, and six-rule calculus
+are unchanged — this is a packaging and UX release built on top of the
+stabilized core.
+
+The cross-session hand-off (`/bellamem save` → `/clear` →
+`/bellamem resume`) was validated end-to-end on the day this RC was
+cut, with a fresh resume reconstructing full session state in
+~30k tokens of context.
+
+---
+
 ## [0.0.2] — 2026-04-09 — rescope to context window management
 
 **Removed the constitution layer** as mission creep. bellamem's job is

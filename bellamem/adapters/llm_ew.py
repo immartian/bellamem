@@ -181,9 +181,10 @@ class LLMExtractor:
             )
         self._client = OpenAI(api_key=key)
         self._model = model
-        self._cache_path = cache_path or os.path.expanduser(
-            "~/.bellamem/llm_ew_cache.json"
-        )
+        if cache_path is None:
+            from ..paths import default_llm_ew_cache_path
+            cache_path = default_llm_ew_cache_path()
+        self._cache_path = cache_path
         self._cache: dict[str, dict] = {}
         self._dirty = 0
         self._load_cache()

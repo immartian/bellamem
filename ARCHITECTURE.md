@@ -29,7 +29,7 @@ budget — and every piece of the code exists to serve that goal.
 │                       embed.py       pluggable embedders    │
 │                       store.py       atomic JSON snapshot   │
 ├─────────────────────────────────────────────────────────────┤
-│  storage              ~/.bellamem/default.json              │
+│  storage              <project>/.graph/default.json         │
 │                       + embed_cache.json                    │
 │                       + llm_ew_cache.json                   │
 └─────────────────────────────────────────────────────────────┘
