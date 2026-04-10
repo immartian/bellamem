@@ -649,6 +649,19 @@ def cmd_save(args: argparse.Namespace) -> int:
     save(bella, snap)
     after = sum(len(g.beliefs) for g in bella.fields.values())
 
+    # Bound the embed cache to live beliefs. Without this, every query
+    # embedding (expand, recall, surprise, emerge) leaks into the cache
+    # forever and RSS grows with session activity instead of belief
+    # count. Structural prune, same philosophy as bellamem prune — the
+    # forest is the source of truth; anything not anchored to it is
+    # noise. See project_prune_decision.md.
+    from .core.embed import prune_embedder
+    live_texts = [b.desc for g in bella.fields.values()
+                  for b in g.beliefs.values()]
+    dropped = prune_embedder(live_texts)
+    if dropped:
+        print(f"embed cache: pruned {dropped} stale entries")
+
     if not results:
         print(f"no Claude Code transcripts found for cwd={args.cwd or os.getcwd()}")
         return 1
