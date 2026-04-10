@@ -14,6 +14,7 @@
     bellamem embedder                 show active embedder
     bellamem migrate                  ~/.bellamem/ → <project>/.graph/
     bellamem render                   graphviz diagram of the belief forest
+    bellamem prune                    remove orphan leaves (structural forgetting)
 """
 
 from __future__ import annotations
@@ -467,6 +468,69 @@ def cmd_migrate(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_prune(args: argparse.Namespace) -> int:
+    """Structural forgetting: remove leaf beliefs that never earned their place.
+
+    Dry-run is the default. Users must pass `--apply` to actually mutate
+    the snapshot. The report counts all candidates and shows the weakest
+    by mass so the user can sanity-check before committing.
+    """
+    from .core.prune import (
+        PruneCriteria,
+        apply_prune,
+        identify_prune_candidates,
+    )
+
+    _setup_embedder()
+    snap = _resolve_snapshot(args.snapshot)
+    try:
+        bella = load(snap)
+    except EmbedderMismatch as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 3
+    if not bella.fields:
+        print("empty memory — nothing to prune")
+        return 0
+
+    criteria = PruneCriteria(
+        age_days=args.age_days,
+        grace_days=args.grace_days,
+        mass_low=args.mass_low,
+        mass_high=args.mass_high,
+        max_voices=args.max_voices,
+    )
+    report = identify_prune_candidates(bella, criteria)
+
+    header = (
+        f"bellamem prune  (age≥{criteria.age_days:g}d, "
+        f"grace≥{criteria.grace_days:g}d, "
+        f"mass∈[{criteria.mass_low:.2f},{criteria.mass_high:.2f}], "
+        f"voices≤{criteria.max_voices})"
+    )
+    print(header)
+    print("=" * len(header))
+    print(report.render(top=args.top))
+
+    if not args.apply:
+        print()
+        print("(dry run — pass --apply to actually remove these beliefs)")
+        return 0
+
+    if report.n_candidates == 0:
+        print()
+        print("nothing to remove.")
+        return 0
+
+    before = sum(len(g.beliefs) for g in bella.fields.values())
+    removed = apply_prune(bella, report)
+    after = sum(len(g.beliefs) for g in bella.fields.values())
+    save(bella, snap)
+    print()
+    print(f"removed {removed} beliefs. total: {before} → {after}")
+    print(f"snapshot: {snap}")
+    return 0
+
+
 def cmd_render(args: argparse.Namespace) -> int:
     """Render the belief forest to an image (or DOT) via graphviz.
 
@@ -626,6 +690,27 @@ def build_parser() -> argparse.ArgumentParser:
         help="copy legacy ~/.bellamem/ runtime state into <project>/.graph/",
     )
     sp.set_defaults(func=cmd_migrate)
+
+    sp = sub.add_parser(
+        "prune",
+        help="remove leaf beliefs that never earned their place "
+             "(dry-run by default)",
+    )
+    sp.add_argument("--apply", action="store_true",
+                    help="actually remove candidates (default: dry run)")
+    sp.add_argument("--age-days", type=float, default=30.0,
+                    help="last_touched must be older than this (default 30)")
+    sp.add_argument("--grace-days", type=float, default=14.0,
+                    help="event_time must be older than this (default 14)")
+    sp.add_argument("--mass-low", type=float, default=0.48,
+                    help="lower bound of the base-mass band (default 0.48)")
+    sp.add_argument("--mass-high", type=float, default=0.55,
+                    help="upper bound of the base-mass band (default 0.55)")
+    sp.add_argument("--max-voices", type=int, default=1,
+                    help="max n_voices for a prune candidate (default 1)")
+    sp.add_argument("--top", type=int, default=10,
+                    help="number of candidates to preview (default 10)")
+    sp.set_defaults(func=cmd_prune)
 
     sp = sub.add_parser(
         "render",
