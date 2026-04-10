@@ -94,25 +94,47 @@ class ReplayResult:
 
 
 def _latest_session_key(bella: "Bella") -> Optional[str]:
-    """Return the jsonl session key with the most recently created belief.
+    """Return the jsonl session key whose underlying file has the most
+    recent mtime on disk.
 
-    Scans beliefs for the newest event_time and returns whichever jsonl
-    session its sources point at. Ties broken by any valid match. Returns
-    None if no beliefs have jsonl sources.
+    We used to pick by belief.event_time, but event_time is stamped at
+    *ingest* time, not *turn* time — so a single `bellamem save` over
+    a corpus of historical transcripts leaves every new belief with
+    nearly identical event_time, and the "latest session" tiebreak
+    became effectively random. A random tiebreak often landed on a
+    months-old session, which made `replay` confidently show stale
+    content as if it were current. File mtime is the real signal for
+    "which session is alive right now": dormant old sessions have
+    their mtime locked at whenever they last grew, while the active
+    session's mtime updates on every turn Claude Code flushes.
+
+    Returns None if no beliefs carry a jsonl source, or if none of
+    the referenced files still exist on disk.
     """
-    best_key: Optional[str] = None
-    best_time = -1.0
+    import os
+
+    # Collect distinct session keys from the graph's belief sources.
+    session_keys: set[str] = set()
     for g in bella.fields.values():
         for b in g.beliefs.values():
-            if not b.sources:
-                continue
-            if b.event_time <= best_time:
-                continue
             for src_key, _line in b.sources:
                 if src_key.startswith("jsonl:"):
-                    best_time = b.event_time
-                    best_key = src_key
-                    break
+                    session_keys.add(src_key)
+
+    # Pick by the underlying file's mtime. Missing files are skipped
+    # silently — a transcript that has been deleted shouldn't win the
+    # "latest session" tiebreak.
+    best_key: Optional[str] = None
+    best_mtime = -1.0
+    for key in session_keys:
+        path = key[len("jsonl:"):]
+        try:
+            mtime = os.path.getmtime(path)
+        except OSError:
+            continue
+        if mtime > best_mtime:
+            best_mtime = mtime
+            best_key = key
     return best_key
 
 

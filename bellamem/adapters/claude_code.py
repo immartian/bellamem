@@ -123,13 +123,27 @@ def project_dir_for(cwd: str) -> str:
 
 
 def list_sessions(cwd: str | None = None) -> list[str]:
-    """Return paths to all .jsonl transcripts for a project directory."""
+    """Return paths to all .jsonl transcripts for a project directory,
+    sorted by modification time ascending.
+
+    The sort order matters for `ingest_project(latest_only=True)`, which
+    picks `sessions[-1]` as the "active session" — that has to be the
+    most recently written file, not the alphabetically-last UUID. Prior
+    versions used `sorted()` on the file names, which produced surprising
+    behaviour when a user's active session UUID didn't happen to sort
+    last (the default case — transcript UUIDs are random).
+
+    Order is otherwise irrelevant; the normal ingest loop processes every
+    file regardless of order.
+    """
     d = project_dir_for(cwd or os.getcwd())
     if not os.path.isdir(d):
         return []
-    return sorted(
+    paths = [
         os.path.join(d, f) for f in os.listdir(d) if f.endswith(".jsonl")
-    )
+    ]
+    paths.sort(key=lambda p: os.path.getmtime(p))
+    return paths
 
 
 def _extract_text(msg: dict) -> str:

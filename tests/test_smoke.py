@@ -714,13 +714,15 @@ def test_merge_combines_sources_dedupes():
     assert survivor.sources.count(("jsonl:/s.jsonl", 12)) == 1
 
 
-def test_replay_orders_by_line_number():
+def test_replay_orders_by_line_number(tmp_path):
     """replay() returns entries sorted by earliest source line asc."""
     from bellamem.core.replay import replay
 
     b = _fresh_bella()
-    # Ingest three claims with explicit source line numbers out of order
-    session = "jsonl:/fake/session.jsonl"
+    # Use a real file so _latest_session_key's mtime lookup succeeds.
+    session_file = tmp_path / "session.jsonl"
+    session_file.touch()
+    session = f"jsonl:{session_file}"
     b.ingest(Claim(text="we should use protobuf for rpc",
                    voice="user", lr=2.0, source=(session, 42)))
     b.ingest(Claim(text="rotate refresh tokens every 24 hours",
@@ -737,12 +739,14 @@ def test_replay_orders_by_line_number():
     assert lines[-1] == 100
 
 
-def test_replay_focus_filter_drops_irrelevant():
+def test_replay_focus_filter_drops_irrelevant(tmp_path):
     """With a focus, beliefs below min_cosine are excluded."""
     from bellamem.core.replay import replay
 
     b = _fresh_bella()
-    session = "jsonl:/fake/s.jsonl"
+    session_file = tmp_path / "s.jsonl"
+    session_file.touch()
+    session = f"jsonl:{session_file}"
     b.ingest(Claim(text="authentication tokens must rotate",
                    voice="user", lr=2.0, source=(session, 10)))
     b.ingest(Claim(text="weather in Oslo is cold today",
@@ -757,12 +761,14 @@ def test_replay_focus_filter_drops_irrelevant():
     assert not any("weather" in d.lower() for d in descs)
 
 
-def test_replay_since_line_filter():
+def test_replay_since_line_filter(tmp_path):
     """--since-line excludes beliefs from earlier lines."""
     from bellamem.core.replay import replay
 
     b = _fresh_bella()
-    session = "jsonl:/s.jsonl"
+    session_file = tmp_path / "s.jsonl"
+    session_file.touch()
+    session = f"jsonl:{session_file}"
     b.ingest(Claim(text="early decision about auth",
                    voice="user", lr=2.0, source=(session, 10)))
     b.ingest(Claim(text="late decision about auth",
@@ -773,7 +779,7 @@ def test_replay_since_line_filter():
     assert "early decision about auth" not in descs
 
 
-def test_replay_tail_preserved_under_tight_budget():
+def test_replay_tail_preserved_under_tight_budget(tmp_path):
     """When budget is tight, recent entries are kept, old ones dropped.
 
     Use very distinct topics so HashEmbedder doesn't collapse the claims
@@ -783,7 +789,9 @@ def test_replay_tail_preserved_under_tight_budget():
     from bellamem.core.replay import replay
 
     b = _fresh_bella()
-    session = "jsonl:/s.jsonl"
+    session_file = tmp_path / "s.jsonl"
+    session_file.touch()
+    session = f"jsonl:{session_file}"
     topics = [
         "authentication tokens must rotate frequently",
         "postgres requires concurrent index builds",
