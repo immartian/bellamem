@@ -445,6 +445,20 @@ questions that were already answered. That's the working reference
 point — a resume that costs much more is usually a sign the graph
 needs `bellamem emerge` to consolidate near-duplicates.
 
+> **First run on an existing project may take a while.** BellaMem
+> ingests every Claude Code transcript the project has accumulated,
+> not just the current session. A project with months of history and
+> hundreds of megabytes of transcripts can take tens of minutes to
+> several hours on the *first* `/bellamem save`. Two ways to bound it:
+>
+> ```bash
+> bellamem save --tail 200       # only the last 200 turns of each transcript
+> bellamem save --latest-only    # only the single most recent transcript
+> ```
+>
+> Subsequent saves are incremental — only new turns get processed —
+> so the first run is usually the only slow one.
+
 ### Where your data lives
 
 ```
