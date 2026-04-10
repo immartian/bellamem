@@ -12,6 +12,8 @@
     bellamem entities [name]          R6 entity index inspection
     bellamem show / stats / reset     inspect / reset snapshot
     bellamem embedder                 show active embedder
+    bellamem migrate                  ~/.bellamem/ → <project>/.graph/
+    bellamem render                   graphviz diagram of the belief forest
 """
 
 from __future__ import annotations
@@ -34,13 +36,18 @@ from .core.expand import expand, expand_before_edit
 from .core.replay import replay
 from .core.scrub import scrub
 from .core.surprise import compute_surprises, render_surprise_report
-
-
-DEFAULT_SNAPSHOT = os.path.expanduser("~/.bellamem/default.json")
+from .paths import (
+    default_embed_cache_path,
+    default_snapshot_path,
+    graph_dir,
+    LEGACY_EMBED_CACHE,
+    LEGACY_LLM_EW_CACHE,
+    LEGACY_SNAPSHOT,
+)
 
 
 def _resolve_snapshot(arg: str | None) -> str:
-    return arg or os.environ.get("BELLAMEM_SNAPSHOT") or DEFAULT_SNAPSHOT
+    return arg or default_snapshot_path()
 
 
 def _setup_embedder() -> None:
@@ -419,15 +426,156 @@ def cmd_scrub(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_migrate(args: argparse.Namespace) -> int:
+    """Copy legacy ~/.bellamem/ runtime state into <project_root>/.graph/.
+
+    Copies rather than moves, so the legacy files stay in place until the
+    user has verified the migration. Skips files that would overwrite an
+    existing target — migration is safe to re-run.
+    """
+    import shutil
+
+    target = graph_dir()
+    target.mkdir(parents=True, exist_ok=True)
+
+    plan = [
+        (LEGACY_SNAPSHOT, target / "default.json", "snapshot"),
+        (LEGACY_EMBED_CACHE, target / "embed_cache.json", "embed cache"),
+        (LEGACY_LLM_EW_CACHE, target / "llm_ew_cache.json", "llm ew cache"),
+    ]
+
+    print(f"migrating legacy ~/.bellamem/ → {target}/")
+    copied = 0
+    for src, dst, label in plan:
+        if not src.exists():
+            print(f"  skip {label}: {src} not found")
+            continue
+        if dst.exists():
+            print(f"  skip {label}: {dst} already exists")
+            continue
+        shutil.copy2(src, dst)
+        print(f"  copied {label}: {src} → {dst}")
+        copied += 1
+
+    if copied == 0:
+        print("nothing to migrate.")
+        return 0
+
+    print()
+    print(f"copied {copied} file(s). legacy files at ~/.bellamem/ are unchanged —")
+    print(f"delete them manually once you've confirmed bellamem works from .graph/.")
+    return 0
+
+
+def cmd_render(args: argparse.Namespace) -> int:
+    """Render the belief forest to an image (or DOT) via graphviz.
+
+    The output format is inferred from the `--out` extension:
+      .dot                          → plain DOT source (no graphviz needed)
+      .svg | .png | .pdf | .gv      → rendered via the `graphviz` Python binding
+    Any other extension is treated as DOT.
+
+    If `graphviz` (the Python package) isn't installed, we fall back to
+    writing the DOT source next to the requested path and print the
+    shell command to rasterize it. That keeps `bellamem render` useful
+    even without the `[viz]` extra.
+    """
+    from .core.visualize import (
+        RenderOptions,
+        focus_ids as compute_focus_ids,
+        to_dot,
+        count_selected,
+    )
+
+    _setup_embedder()
+    snap = _resolve_snapshot(args.snapshot)
+    try:
+        bella = load(snap)
+    except EmbedderMismatch as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 3
+    if not bella.fields:
+        print("empty memory — nothing to render", file=sys.stderr)
+        return 1
+
+    # Resolve the focus filter first so count_selected reports the final size.
+    fids: set[str] | None = None
+    if args.focus:
+        fids = compute_focus_ids(
+            bella.fields,
+            args.focus,
+            top=args.focus_top,
+            depth=args.depth,
+            embedder=current_embedder(),
+        )
+        if not fids:
+            print(f"no beliefs matched focus {args.focus!r}", file=sys.stderr)
+            return 1
+
+    opts = RenderOptions(
+        fields=[args.field] if args.field else None,
+        disputes_only=args.disputes_only,
+        min_mass=args.min_mass,
+        max_nodes=args.max_nodes,
+        focus_ids=fids,
+        title=args.title,
+        dpi=args.dpi,
+    )
+
+    n = count_selected(bella.fields, opts)
+    dot_source = to_dot(bella.fields, opts)
+
+    out = args.out
+    ext = os.path.splitext(out)[1].lower().lstrip(".")
+    raster_formats = {"svg", "png", "pdf", "gv"}
+
+    if ext in raster_formats:
+        try:
+            import graphviz  # type: ignore[import-not-found]
+        except ImportError:
+            dot_path = os.path.splitext(out)[0] + ".dot"
+            os.makedirs(os.path.dirname(os.path.abspath(dot_path)) or ".", exist_ok=True)
+            with open(dot_path, "w") as f:
+                f.write(dot_source)
+            print(
+                f"graphviz Python package not installed — wrote DOT source to "
+                f"{dot_path} ({n} nodes). Install the viz extra with "
+                f"`pip install bellamem[viz]` to render directly, or run "
+                f"`dot -T{ext} -o {out} {dot_path}` with the graphviz system "
+                f"tool if you already have it.",
+                file=sys.stderr,
+            )
+            return 0
+
+        src = graphviz.Source(dot_source, engine=args.engine)
+        out_dir = os.path.dirname(os.path.abspath(out)) or "."
+        os.makedirs(out_dir, exist_ok=True)
+        basename = os.path.splitext(os.path.basename(out))[0]
+        # graphviz.Source.render writes <basename>.<format>; we accept that.
+        rendered = src.render(
+            filename=basename,
+            directory=out_dir,
+            format=ext,
+            cleanup=True,
+        )
+        print(f"rendered {n} nodes → {rendered}")
+        return 0
+
+    # DOT fallback — write the source verbatim.
+    out_dir = os.path.dirname(os.path.abspath(out)) or "."
+    os.makedirs(out_dir, exist_ok=True)
+    with open(out, "w") as f:
+        f.write(dot_source)
+    print(f"wrote DOT source ({n} nodes) → {out}")
+    return 0
+
+
 def cmd_embedder(args: argparse.Namespace) -> int:
     _setup_embedder()
     e = current_embedder()
     print(f"active embedder: {e.name}")
     print(f"dim:             {e.dim}")
-    cache_path = os.environ.get(
-        "BELLAMEM_EMBEDDER_CACHE_PATH",
-        os.path.expanduser("~/.bellamem/embed_cache.json"),
-    )
+    cache_path = default_embed_cache_path()
     kind = os.environ.get("BELLAMEM_EMBEDDER", "hash")
     print(f"kind (env):      {kind}")
     if kind != "hash":
@@ -438,7 +586,7 @@ def cmd_embedder(args: argparse.Namespace) -> int:
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="bellamem",
                                  description="local accumulating memory for LLM agents")
-    p.add_argument("--snapshot", help="snapshot path (default: ~/.bellamem/default.json)")
+    p.add_argument("--snapshot", help="snapshot path (default: <project>/.graph/default.json)")
     sub = p.add_subparsers(dest="cmd", required=True)
 
     sp = sub.add_parser("ingest-cc", help="ingest Claude Code .jsonl transcripts")
@@ -472,6 +620,43 @@ def build_parser() -> argparse.ArgumentParser:
 
     sp = sub.add_parser("embedder", help="show the active embedder config")
     sp.set_defaults(func=cmd_embedder)
+
+    sp = sub.add_parser(
+        "migrate",
+        help="copy legacy ~/.bellamem/ runtime state into <project>/.graph/",
+    )
+    sp.set_defaults(func=cmd_migrate)
+
+    sp = sub.add_parser(
+        "render",
+        help="render the belief forest as a graphviz diagram (SVG/PNG/PDF/DOT)",
+    )
+    sp.add_argument("--out", default="graph.svg",
+                    help="output path; extension sets format "
+                         "(.svg/.png/.pdf/.dot, default graph.svg)")
+    sp.add_argument("--focus", default=None,
+                    help="focus description — renders a subgraph around the "
+                         "top matches plus --depth steps of neighbors")
+    sp.add_argument("--focus-top", type=int, default=20,
+                    help="number of closest-to-focus seed beliefs (default 20)")
+    sp.add_argument("--depth", type=int, default=2,
+                    help="BFS expansion depth from seeds (default 2)")
+    sp.add_argument("--field", default=None,
+                    help="restrict to one field by name")
+    sp.add_argument("--disputes-only", action="store_true",
+                    help="only show ⊥ edges and their endpoints")
+    sp.add_argument("--min-mass", type=float, default=0.0,
+                    help="drop beliefs below this mass (default 0.0)")
+    sp.add_argument("--max-nodes", type=int, default=400,
+                    help="hard cap on rendered nodes (default 400)")
+    sp.add_argument("--engine", default="sfdp",
+                    help="graphviz layout engine "
+                         "(dot|neato|fdp|sfdp|twopi|circo; default sfdp)")
+    sp.add_argument("--title", default=None,
+                    help="title label on the diagram")
+    sp.add_argument("--dpi", type=int, default=150,
+                    help="raster resolution for PNG/PDF output (default 150)")
+    sp.set_defaults(func=cmd_render)
 
     sp = sub.add_parser("scrub",
                         help="remove system-noise beliefs from the snapshot")

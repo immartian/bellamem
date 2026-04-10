@@ -22,7 +22,7 @@ Configuration is via environment variables (optionally loaded from a
     BELLAMEM_EMBEDDER           hash | st | openai        (default: hash)
     BELLAMEM_EMBEDDER_MODEL     model id                  (default depends on kind)
     BELLAMEM_EMBEDDER_CACHE     0 or 1                    (default: 1 for non-hash)
-    BELLAMEM_EMBEDDER_CACHE_PATH  path to cache file      (default: ~/.bellamem/embed_cache.json)
+    BELLAMEM_EMBEDDER_CACHE_PATH  path to cache file      (default: <project>/.graph/embed_cache.json)
     OPENAI_API_KEY              for openai backend
 """
 
@@ -359,10 +359,8 @@ def make_embedder_from_env() -> Embedder:
         raise ValueError(f"unknown BELLAMEM_EMBEDDER={kind!r} (hash|st|openai)")
     if not _truthy(os.environ.get("BELLAMEM_EMBEDDER_CACHE", "1")):
         return inner
-    cache_path = os.environ.get(
-        "BELLAMEM_EMBEDDER_CACHE_PATH",
-        os.path.expanduser("~/.bellamem/embed_cache.json"),
-    )
+    from ..paths import default_embed_cache_path
+    cache_path = default_embed_cache_path()
     return DiskCacheEmbedder(inner, cache_path)
 
 

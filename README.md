@@ -89,23 +89,42 @@ Together they form a belief-and-narrative view of the session: facts
 
 ## Install
 
+Pick whichever matches how you like to install Python tools. The
+recommended path is **pipx** — a single global `bellamem` command, no
+`.venv` to remember, no PATH surgery:
+
 ```bash
+pipx install bellamem                      # once published to PyPI
+# or, from a local clone:
 git clone https://github.com/immartian/bellamem
-cd bellamem
-python3 -m venv .venv
-.venv/bin/pip install -e .            # zero-dep default
+pipx install -e ./bellamem                  # editable install, still global
 ```
 
-Optional upgrades, each behind an extras flag:
+Prefer a per-project venv? That works too:
 
 ```bash
-.venv/bin/pip install -e '.[st]'       # sentence-transformers (local embeddings)
-.venv/bin/pip install -e '.[openai]'   # OpenAI embeddings + LLM-backed EW
-.venv/bin/pip install -e '.[all]'      # both
+cd your-project
+python3 -m venv .venv
+.venv/bin/pip install bellamem              # or: pip install -e /path/to/bellamem
 ```
 
-Copy `.env.example` → `.env` and fill in the backends you enabled.
-`.env` is gitignored.
+Optional extras (add to whichever install style you picked):
+
+```bash
+pipx inject bellamem 'sentence-transformers>=2.2'   # local embeddings
+pipx inject bellamem 'openai>=1.0'                  # OpenAI embeddings + LLM EW
+# or with pip:
+pip install 'bellamem[st]'    # sentence-transformers
+pip install 'bellamem[openai]' # OpenAI
+pip install 'bellamem[all]'    # both
+```
+
+Copy `.env.example` → `.env` in the project you want bellamem to
+operate on, and fill in the backends you enabled. `.env` is
+gitignored.
+
+**Requirements:** Python 3.10+. Git (bellamem uses the git repo root to
+scope per-project state). No other system dependencies.
 
 ---
 
@@ -128,6 +147,11 @@ bellamem before-edit "should I wrap this in try/except" --entity embed.py
 # Health report: bandaid piles, duplicates, garbage field names, mass limbo
 bellamem audit
 
+# Render the graph as a picture (needs the [viz] extra or graphviz CLI)
+bellamem render --out graph.svg                           # whole forest
+bellamem render --out disputes.svg --disputes-only        # just ⊥ edges
+bellamem render --out auth.svg --focus "auth tokens"      # subgraph around a focus
+
 # One-time migrations
 bellamem scrub                     # remove system-noise beliefs from old snapshots
 bellamem emerge --llm              # merge near-duplicates + rename fields via cheap LLM
@@ -140,9 +164,15 @@ Every command except `ingest-cc`, `emerge`, and `scrub` is read-only.
 
 ### Starting a new session from an existing tree
 
-The belief tree lives at `~/.bellamem/default.json` (or wherever
-`BELLAMEM_SNAPSHOT` points). It survives Claude Code session
-boundaries, `/compact`, and process restarts.
+The belief tree lives at `<project>/.graph/default.json` by default
+(override with `BELLAMEM_SNAPSHOT`). It survives Claude Code session
+boundaries, `/compact`, and process restarts. Each project gets its own
+graph — no cross-project leakage.
+
+> Upgrading from pre-v0.0.3? Your old graph is at `~/.bellamem/default.json`.
+> Run `bellamem migrate` once in your project to copy it into `.graph/`.
+> The legacy file is left in place; delete it manually after you've
+> verified everything works.
 
 To pick up where a prior session left off:
 
@@ -167,6 +197,99 @@ bellamem expand "what did we decide about <topic>"
 memory at the start of a new session, combine it with `git` (code
 state) and Claude Code's native tools (filesystem, environment). Any
 one of them alone is incomplete.
+
+---
+
+## Use with Claude Code
+
+The hand-off flow above is easier to run through a set of **slash
+commands** that ship with BellaMem. They package the `/save` → `/clear`
+→ `/resume` pattern into four friendly entry points so you never have
+to remember a CLI invocation mid-session.
+
+### Drop the commands into your project
+
+```bash
+# From the bellamem checkout (or from any released tarball):
+mkdir -p <your-project>/.claude/commands
+cp .claude/commands/bellamem.md        <your-project>/.claude/commands/
+cp .claude/commands/bellamem-cmd.sh    <your-project>/.claude/commands/
+chmod +x <your-project>/.claude/commands/bellamem-cmd.sh
+```
+
+The dispatcher auto-detects your install style: if the project has a
+`.venv/bin/bellamem`, it uses that; otherwise it falls back to whatever
+`bellamem` is on `$PATH` (pipx, user install, system package). No
+config needed.
+
+### The four commands
+
+| Command | What it does |
+|---|---|
+| `/bellamem` or `/bellamem resume` | Working-memory replay tail + long-term-memory expand pack + top surprises. Run at session start. |
+| `/bellamem save` | Ingest the current session (auto-consolidates), run audit, report top new surprises. Run before `/clear` or at end of day. |
+| `/bellamem recall <topic>` | Mass-ranked beliefs about a topic, disputes included. Mid-session lookup. |
+| `/bellamem why <topic>` | Pre-edit pack: invariants, disputes, causes, entity bridges. Run before a risky change. |
+| `/bellamem replay` / `/bellamem audit` | Raw CLI output for when you want to look at it directly. |
+
+### First run
+
+In a fresh Claude Code session inside the project:
+
+```
+/bellamem help
+```
+
+You should see the usage message. If you get `error: bellamem not
+found`, re-check the install step above — the dispatcher tells you
+exactly which install paths it looked at.
+
+### The save → clear → resume flow
+
+The flow that lets you keep working past the context window without
+losing the thread:
+
+```
+/bellamem save     ← captures this session into the graph
+/clear             ← wipe the context window (Claude Code built-in)
+/bellamem resume   ← fresh me reconstructs where we were
+```
+
+On a well-tuned project, `/bellamem resume` comes back in ~30k tokens
+and contains enough to pick up the next decision without re-asking
+questions that were already answered. That's the working reference
+point — a resume that costs much more is usually a sign the graph
+needs `bellamem emerge` to consolidate near-duplicates.
+
+### Where your data lives
+
+```
+<your-project>/
+  .graph/
+    default.json          belief graph (gitignored by default)
+    embed_cache.json      embedding cache (if BELLAMEM_EMBEDDER ≠ hash)
+    llm_ew_cache.json     LLM EW cache (if BELLAMEM_EW=hybrid)
+  .claude/
+    commands/
+      bellamem.md
+      bellamem-cmd.sh
+  .env                    your API keys + embedder choice (never commit)
+```
+
+`.graph/` is gitignored by default. Remove the entry from `.gitignore`
+if you *want* to commit your graph (small teams sharing a single
+memory, or archival).
+
+### Environment notes
+
+- **Python 3.10+.** The CLI is stdlib-only by default.
+- **No API key required** for the default hash embedder and regex EW.
+- **`OPENAI_API_KEY`** only matters if you set `BELLAMEM_EMBEDDER=openai`
+  or `BELLAMEM_EW=hybrid` in `.env`. Cost is ~$0.002 per typical 98-turn
+  session in hybrid mode.
+- **`BELLAMEM_SNAPSHOT`**, **`BELLAMEM_EMBEDDER_CACHE_PATH`**, and
+  **`BELLAMEM_EW_LLM_CACHE_PATH`** override the project-local defaults
+  if you need to point somewhere else.
 
 ---
 
@@ -196,6 +319,22 @@ The two are complementary, not competing: `/compact` keeps the *feel*
 of the conversation going inside one session. BellaMem keeps the
 *decisions* available across sessions, and `bellamem replay` gives you
 a structured narrative view when you want one.
+
+### What the graph actually looks like
+
+This is BellaMem's own belief graph, filtered to just the **⊥
+dispute edges** — the rejected approaches the project has considered
+and moved past. Each red dashed edge is a branch we explicitly didn't
+take. Rendered directly from the live `.graph/default.json` with
+`bellamem render --disputes-only`:
+
+![BellaMem dispute structure](docs/bellamem-disputes.svg)
+
+This is the information `/compact` cannot preserve in narrative form.
+A prose summary remembers that "the team considered X"; the graph
+remembers *which* X, *why* it was rejected, *what* it was rejected in
+favor of, and makes all three queryable. That's the load-bearing
+difference.
 
 ---
 

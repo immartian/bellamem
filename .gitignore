@@ -41,8 +41,10 @@ htmlcov/
 .mypy_cache/
 .ruff_cache/
 
-# bellamem runtime state (lives in ~/.bellamem by default, but in case
-# a user points BELLAMEM_SNAPSHOT at the repo, keep these out)
+# bellamem runtime state — per-project graph lives in .graph/ by default.
+# Gitignored so a repo's history doesn't carry its belief graph; users who
+# want to commit their graph can remove this line explicitly.
+.graph/
 data/
 snapshots/
 *.snapshot.json
