@@ -172,7 +172,10 @@ class LLMExtractor:
             from openai import OpenAI  # type: ignore
         except ImportError as e:
             raise RuntimeError(
-                "openai is not installed. Install with: pip install -e '.[openai]'"
+                "openai is not installed. Install with one of:\n"
+                "  pipx inject bellamem 'openai>=1.0'   (if you pipx-installed bellamem — recommended)\n"
+                "  pip install 'bellamem[openai]'       (if you used a regular pip install)\n"
+                "  pip install -e '.[openai]'           (if you're running from a source checkout)"
             ) from e
         key = api_key or os.environ.get("OPENAI_API_KEY")
         if not key:

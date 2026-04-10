@@ -167,7 +167,10 @@ class OpenAIEmbedder:
             from openai import OpenAI  # type: ignore
         except ImportError as e:
             raise RuntimeError(
-                "openai is not installed. Install with: pip install -e '.[openai]'"
+                "openai is not installed. Install with one of:\n"
+                "  pipx inject bellamem 'openai>=1.0'   (if you pipx-installed bellamem — recommended)\n"
+                "  pip install 'bellamem[openai]'       (if you used a regular pip install)\n"
+                "  pip install -e '.[openai]'           (if you're running from a source checkout)"
             ) from e
         key = api_key or os.environ.get("OPENAI_API_KEY")
         if not key:
@@ -266,6 +269,27 @@ class DiskCacheEmbedder:
         """Force a save if there are unsaved writes. Call at end of ingest."""
         if self._dirty > 0:
             self._save()
+
+    def prune_to(self, texts) -> int:
+        """Keep only cache entries whose key matches one of `texts`.
+
+        Bounds the cache to what the live forest still needs. Without
+        this, every `expand`/`recall`/`surprise`/`emerge` call leaves a
+        query embedding behind forever, and the cache grows monotonically
+        with session activity — not with belief count.
+
+        Returns the number of entries dropped. Writes the cache file
+        atomically if anything was removed.
+        """
+        keep = {self._key(t) for t in texts}
+        before = len(self._cache)
+        if before == 0:
+            return 0
+        self._cache = {k: v for k, v in self._cache.items() if k in keep}
+        dropped = before - len(self._cache)
+        if dropped:
+            self._save()
+        return dropped
 
     def embed(self, text: str) -> list[float]:
         k = self._key(text)
@@ -394,6 +418,17 @@ def flush_embedder() -> None:
     flush = getattr(default_embedder, "flush", None)
     if callable(flush):
         flush()
+
+
+def prune_embedder(texts) -> int:
+    """Bound the disk cache to the set of texts passed in.
+
+    Safe no-op for backends without a cache. Returns entries dropped.
+    """
+    prune = getattr(default_embedder, "prune_to", None)
+    if callable(prune):
+        return int(prune(texts))
+    return 0
 
 
 # ---------------------------------------------------------------------------
