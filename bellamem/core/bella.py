@@ -54,6 +54,10 @@ class Claim:
     target_field: Optional[str] = None  # field the target belongs to (disambiguates target_hint)
     entity_refs: list[str] = field(default_factory=list)
     event_time: float = field(default_factory=time.time)
+    # Provenance: (session_key, line_number) tuple identifying where this
+    # claim came from in its source transcript. None for claims that
+    # don't have transcript provenance (tests, programmatic CLI actions).
+    source: Optional[tuple[str, int]] = None
     extras: dict = field(default_factory=dict)
 
 
@@ -207,7 +211,8 @@ class Bella:
             g = self.fields[SELF_MODEL_FIELD]
             return tag(ops.add(g, text, parent=None, voice=claim.voice,
                                lr=claim.lr, embedding=emb,
-                               entity_refs=claim.entity_refs),
+                               entity_refs=claim.entity_refs,
+                               source=claim.source),
                        SELF_MODEL_FIELD)
 
         # Relations with a known target — honor target_field if provided.
@@ -224,14 +229,17 @@ class Bella:
                 if claim.relation == "deny":
                     return tag(ops.deny(g, claim.target_hint, text,
                                         voice=claim.voice, lr=claim.lr,
-                                        embedding=emb), target_field)
+                                        embedding=emb,
+                                        source=claim.source), target_field)
                 if claim.relation == "cause":
                     return tag(ops.cause(g, claim.target_hint, text,
                                          voice=claim.voice, lr=claim.lr,
-                                         embedding=emb), target_field)
+                                         embedding=emb,
+                                         source=claim.source), target_field)
                 if claim.relation == "amend":
                     return tag(ops.amend(g, claim.target_hint, text,
-                                         voice=claim.voice, lr=claim.lr),
+                                         voice=claim.voice, lr=claim.lr,
+                                         source=claim.source),
                                target_field)
             # Target not found — fall through to similarity-based routing.
 
@@ -242,15 +250,18 @@ class Bella:
         if claim.relation == "deny" and claim.target_hint and field_name:
             g = self.fields[field_name]
             return tag(ops.deny(g, claim.target_hint, text, voice=claim.voice,
-                                lr=claim.lr, embedding=emb), field_name)
+                                lr=claim.lr, embedding=emb,
+                                source=claim.source), field_name)
         if claim.relation == "cause" and claim.target_hint and field_name:
             g = self.fields[field_name]
             return tag(ops.cause(g, claim.target_hint, text, voice=claim.voice,
-                                 lr=claim.lr, embedding=emb), field_name)
+                                 lr=claim.lr, embedding=emb,
+                                 source=claim.source), field_name)
         if claim.relation == "amend" and claim.target_hint and field_name:
             g = self.fields[field_name]
             return tag(ops.amend(g, claim.target_hint, text, voice=claim.voice,
-                                 lr=claim.lr), field_name)
+                                 lr=claim.lr,
+                                 source=claim.source), field_name)
 
         # No existing field close enough → birth a new one
         if field_name is None:
@@ -264,7 +275,8 @@ class Bella:
             self.fields[name] = g
             return tag(ops.add(g, text, parent=None, voice=claim.voice,
                                lr=claim.lr, embedding=emb,
-                               entity_refs=claim.entity_refs), name)
+                               entity_refs=claim.entity_refs,
+                               source=claim.source), name)
 
         g = self.fields[field_name]
 
@@ -272,20 +284,24 @@ class Bella:
         if sim >= AUTO_CONFIRM and best_bid:
             if claim.relation == "deny":
                 return tag(ops.deny(g, best_bid, text, voice=claim.voice,
-                                    lr=claim.lr, embedding=emb), field_name)
+                                    lr=claim.lr, embedding=emb,
+                                    source=claim.source), field_name)
             return tag(ops.confirm(g, best_bid, voice=claim.voice,
-                                   lr=claim.lr), field_name)
+                                   lr=claim.lr,
+                                   source=claim.source), field_name)
 
         # Otherwise add as a child of the nearest belief (if close enough)
         if sim >= CHILD_ATTACH and best_bid:
             rel = REL_COUNTER if claim.relation == "deny" else REL_SUPPORT
             b = g.add(text, parent=best_bid, rel=rel, voice=claim.voice,
-                      lr=claim.lr, embedding=emb, entity_refs=claim.entity_refs)
+                      lr=claim.lr, embedding=emb, entity_refs=claim.entity_refs,
+                      source=claim.source)
             return tag(ops.OpResult(ops.OP_ADD, b), field_name)
 
         # Loosely related — add as a new root in the same field
         b = g.add(text, parent=None, rel=REL_SUPPORT, voice=claim.voice,
-                  lr=claim.lr, embedding=emb, entity_refs=claim.entity_refs)
+                  lr=claim.lr, embedding=emb, entity_refs=claim.entity_refs,
+                  source=claim.source)
         return tag(ops.OpResult(ops.OP_ADD, b), field_name)
 
     # ----- entity index (R6 bridging) -------------------------------------

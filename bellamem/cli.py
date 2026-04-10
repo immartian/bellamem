@@ -3,7 +3,11 @@
     bellamem ingest-cc [--cwd PATH]   ingest Claude Code transcripts
     bellamem expand "focus" [-t N]    generic mass-weighted context pack
     bellamem before-edit "focus"      5-layer pack for a proposed edit
-    bellamem audit                    bandaid piles / ratified / disputes
+    bellamem audit                    entropy report: piles / duplicates / glut
+    bellamem surprises                top Jaynes step surprises + sign flips
+    bellamem scrub                    remove system-noise beliefs (migration)
+    bellamem emerge                   R3: merge near-duplicates + rename fields
+    bellamem replay [focus]           chronological belief timeline (by source line)
     bellamem bench                    empirical comparison vs flat/RAG
     bellamem entities [name]          R6 entity index inspection
     bellamem show / stats / reset     inspect / reset snapshot
@@ -25,7 +29,11 @@ from .core.embed import (
     make_embedder_from_env,
     set_embedder,
 )
+from .core.emerge import emerge
 from .core.expand import expand, expand_before_edit
+from .core.replay import replay
+from .core.scrub import scrub
+from .core.surprise import compute_surprises, render_surprise_report
 
 
 DEFAULT_SNAPSHOT = os.path.expanduser("~/.bellamem/default.json")
@@ -63,6 +71,18 @@ def cmd_ingest_cc(args: argparse.Namespace) -> int:
         bella, cwd=args.cwd,
         tail=args.tail, no_llm=args.no_llm, latest_only=args.latest_only,
     )
+    after_ingest = sum(len(g.beliefs) for g in bella.fields.values())
+
+    # R3 auto-emerge: consolidation is part of the ingest pipeline, not a
+    # separate step. Recent beliefs enter as "unconsolidated" and become
+    # "consolidated" through R3 running over them. Runs without the LLM
+    # on the hot path — merges only, no field renames. `--no-emerge`
+    # skips this if a session explicitly wants to inspect the raw output.
+    merged = 0
+    if not args.no_emerge and results:
+        emerge_report = emerge(bella)
+        merged = len(emerge_report.merges)
+
     save(bella, snap)
     after = sum(len(g.beliefs) for g in bella.fields.values())
     if not results:
@@ -75,7 +95,10 @@ def cmd_ingest_cc(args: argparse.Namespace) -> int:
         if r.get("causes") or r.get("self_obs"):
             line += f"  (causes:{r.get('causes', 0)} self_obs:{r.get('self_obs', 0)})"
         print(line)
-    print(f"beliefs: {before} → {after}  (+{after - before})")
+    if merged:
+        print(f"emerge (auto): merged {merged} near-duplicate pair(s)")
+    print(f"beliefs: {before} → {after_ingest} → {after}"
+          f"  (+{after_ingest - before} ingested, -{after_ingest - after} merged)")
     print(f"snapshot: {snap}")
     return 0
 
@@ -270,6 +293,132 @@ def cmd_audit(args: argparse.Namespace) -> int:
     return 0 if report.is_clean() else (0 if args.no_exit_code else 4)
 
 
+def cmd_emerge(args: argparse.Namespace) -> int:
+    _setup_embedder()
+    snap = _resolve_snapshot(args.snapshot)
+    try:
+        bella = load(snap)
+    except EmbedderMismatch as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 3
+    if not bella.fields:
+        print("empty memory — nothing to emerge")
+        return 0
+
+    name_fn = None
+    llm_extractor = None
+    if args.llm:
+        # LLM-backed refiner for fields the baseline can't name.
+        from .adapters.llm_ew import make_llm_ew_from_env, make_llm_name_fn, LLMExtractor
+        # Force-construct an extractor even if BELLAMEM_EW isn't hybrid —
+        # --llm is an explicit opt-in for this command.
+        try:
+            llm_extractor = make_llm_ew_from_env()
+            if llm_extractor is None:
+                llm_extractor = LLMExtractor()
+        except RuntimeError as e:
+            print(f"--llm requested but: {e}", file=sys.stderr)
+            return 2
+        name_fn = make_llm_name_fn(llm_extractor)
+
+    report = emerge(bella, min_cosine=args.min_cosine,
+                    dry_run=args.dry_run, name_fn=name_fn)
+    if llm_extractor is not None:
+        llm_extractor.flush()
+
+    print(report.render())
+    if args.dry_run:
+        print("(dry run — snapshot not saved)")
+        return 0
+    if not report.merges and not report.renames:
+        print("(no changes — snapshot not rewritten)")
+        return 0
+    save(bella, snap)
+    print(f"snapshot: {snap}")
+    return 0
+
+
+def cmd_replay(args: argparse.Namespace) -> int:
+    _setup_embedder()
+    snap = _resolve_snapshot(args.snapshot)
+    try:
+        bella = load(snap)
+    except EmbedderMismatch as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 3
+    if not bella.fields:
+        print("empty memory — run `bellamem ingest-cc` first", file=sys.stderr)
+        return 1
+    result = replay(
+        bella,
+        focus=args.focus,
+        session=args.session,
+        since_line=args.since_line,
+        budget_tokens=args.budget,
+    )
+    if result.session_key is None:
+        print("no source-grounded beliefs yet — re-ingest to populate sources",
+              file=sys.stderr)
+        return 1
+    print(result.text())
+    print()
+    shown = len(result.entries)
+    total = result.total_candidates
+    suffix = ""
+    if shown < total:
+        suffix = f" (tail-preserved {shown}/{total}, budget={args.budget}t)"
+    print(f"— {shown} entries{suffix}, ~{result.used_tokens()}t —")
+    return 0
+
+
+def cmd_surprises(args: argparse.Namespace) -> int:
+    _setup_embedder()
+    snap = _resolve_snapshot(args.snapshot)
+    try:
+        bella = load(snap)
+    except EmbedderMismatch as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 3
+    if not bella.fields:
+        print("empty memory — run `bellamem ingest-cc` first", file=sys.stderr)
+        return 1
+    window = None
+    if args.since_hours is not None:
+        window = args.since_hours * 3600
+    report = compute_surprises(bella, top_n=args.top,
+                               recent_window_seconds=window)
+    print(render_surprise_report(report, max_per_section=args.top))
+    return 0
+
+
+def cmd_scrub(args: argparse.Namespace) -> int:
+    _setup_embedder()
+    snap = _resolve_snapshot(args.snapshot)
+    try:
+        bella = load(snap)
+    except EmbedderMismatch as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 3
+    if not bella.fields:
+        print("empty memory — nothing to scrub")
+        return 0
+    before = sum(len(g.beliefs) for g in bella.fields.values())
+    report = scrub(bella)
+    after = sum(len(g.beliefs) for g in bella.fields.values())
+    print(report.render())
+    print()
+    print(f"beliefs: {before} → {after}  (-{before - after})")
+    if args.dry_run:
+        print("(dry run — snapshot not saved)")
+        return 0
+    if report.beliefs_removed == 0 and not report.fields_removed:
+        print("(nothing changed — snapshot not rewritten)")
+        return 0
+    save(bella, snap)
+    print(f"snapshot: {snap}")
+    return 0
+
+
 def cmd_embedder(args: argparse.Namespace) -> int:
     _setup_embedder()
     e = current_embedder()
@@ -300,6 +449,8 @@ def build_parser() -> argparse.ArgumentParser:
                     help="disable LLM-backed EW regardless of BELLAMEM_EW")
     sp.add_argument("--latest-only", action="store_true",
                     help="only ingest the most recent session (demos / quick tests)")
+    sp.add_argument("--no-emerge", action="store_true",
+                    help="skip R3 auto-consolidation at end of ingest")
     sp.set_defaults(func=cmd_ingest_cc)
 
     sp = sub.add_parser("expand", help="print a mass-weighted context pack")
@@ -321,6 +472,43 @@ def build_parser() -> argparse.ArgumentParser:
 
     sp = sub.add_parser("embedder", help="show the active embedder config")
     sp.set_defaults(func=cmd_embedder)
+
+    sp = sub.add_parser("scrub",
+                        help="remove system-noise beliefs from the snapshot")
+    sp.add_argument("--dry-run", action="store_true",
+                    help="show what would be removed without saving")
+    sp.set_defaults(func=cmd_scrub)
+
+    sp = sub.add_parser("replay",
+                        help="narrative replay: beliefs from a session in line order")
+    sp.add_argument("focus", nargs="?", default=None,
+                    help="optional focus to filter by relevance")
+    sp.add_argument("-t", "--budget", type=int, default=1500,
+                    help="token budget (default 1500)")
+    sp.add_argument("--session",
+                    help="session key override (default: most recently active)")
+    sp.add_argument("--since-line", type=int, default=None,
+                    help="only include beliefs from line ≥ N")
+    sp.set_defaults(func=cmd_replay)
+
+    sp = sub.add_parser("surprises",
+                        help="top Jaynes step surprises, sign flips, disputes")
+    sp.add_argument("--top", type=int, default=10,
+                    help="rows per section (default 10)")
+    sp.add_argument("--since-hours", type=float, default=None,
+                    help="only consider jumps in the last N hours")
+    sp.set_defaults(func=cmd_surprises)
+
+    sp = sub.add_parser("emerge",
+                        help="R3: merge near-duplicates + rename garbage fields")
+    sp.add_argument("--dry-run", action="store_true",
+                    help="report what would change without saving")
+    sp.add_argument("--min-cosine", type=float, default=0.92,
+                    help="minimum cosine similarity for a merge (default 0.92)")
+    sp.add_argument("--llm", action="store_true",
+                    help="use gpt-4o-mini to name fields the baseline can't "
+                         "(needs [openai] extra + OPENAI_API_KEY)")
+    sp.set_defaults(func=cmd_emerge)
 
     sp = sub.add_parser("before-edit",
                         help="bandaid-blocker pack for a focus entity")

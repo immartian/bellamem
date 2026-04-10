@@ -104,6 +104,32 @@ _SELF_SYSTEM = (
     "Return strict JSON."
 )
 
+_FIELD_NAME_SYSTEM = (
+    "You name clusters of beliefs about software engineering. You receive "
+    "the descriptions of the highest-mass beliefs in one cluster. Your job "
+    "is to output a short snake_case identifier (2-3 tokens, max 40 chars) "
+    "that captures the cluster's topic. "
+    "Prefer concrete domain nouns (auth, embeddings, ingest, routing). "
+    "Avoid filler words (memory, session, system, without, with, the). "
+    "Return strict JSON."
+)
+
+_FIELD_NAME_USER_TEMPLATE = """Here are the top beliefs in one cluster. \
+Give a 2-3 word snake_case name for the cluster.
+
+Beliefs:
+{beliefs}
+
+Return: {{"name": "example_snake_case"}}
+Rules:
+- 2 or 3 underscore-separated tokens
+- lowercase letters, digits, underscores only
+- max 40 characters total
+- concrete (e.g. auth_tokens, bench_corpus, embedder_config) not abstract
+  (e.g. memory_session, system_design, project_state)
+"""
+
+
 _SELF_USER_TEMPLATE = """Identify habitual self-observations in the text below.
 
 Extract statements like:
@@ -249,6 +275,35 @@ class LLMExtractor:
                 out.append((c, e))
         return out
 
+    def suggest_field_name(self, belief_descs: list[str]) -> str:
+        """Return a snake_case field name from the top-mass belief descs.
+
+        Single LLM call, cached. Returns empty string on failure so
+        callers can fall back to the previous name. The output is
+        sanitized client-side — we don't trust the model to produce
+        exactly the format requested.
+        """
+        if not belief_descs:
+            return ""
+        # Build a deterministic cache key from the joined descs
+        joined = "\n".join(f"- {d[:200]}" for d in belief_descs[:12])
+        key = self._key("fieldname", joined)
+        if key in self._cache:
+            entry = self._cache[key]
+        else:
+            user = _FIELD_NAME_USER_TEMPLATE.format(beliefs=joined)
+            entry = self._call_json(_FIELD_NAME_SYSTEM, user)
+            self._cache[key] = entry
+            self._mark_dirty()
+        if not isinstance(entry, dict):
+            return ""
+        raw = entry.get("name", "")
+        if not isinstance(raw, str):
+            return ""
+        # Sanitize to the contract: lowercase, alnum+underscore, ≤ 40
+        sanitized = re.sub(r"[^a-z0-9_]+", "_", raw.lower()).strip("_")[:40]
+        return sanitized
+
     def find_self_observations(self, text: str) -> list[str]:
         """Return paraphrased self-observations. Cache-first."""
         if not text or not has_self_markers(text):
@@ -270,7 +325,8 @@ class LLMExtractor:
 # ---------------------------------------------------------------------------
 
 def ingest_causes(bella: "Bella", extractor: LLMExtractor, text: str,
-                  *, voice: str = "assistant", lr: float = 1.3
+                  *, voice: str = "assistant", lr: float = 1.3,
+                  source: "tuple[str, int] | None" = None
                   ) -> list[tuple[str, str]]:
     """Extract cause pairs from text and ingest them as structured beliefs.
 
@@ -279,13 +335,17 @@ def ingest_causes(bella: "Bella", extractor: LLMExtractor, text: str,
       2. Ingest the cause with relation="cause", target_hint=effect_id,
          target_field=effect_field so the CAUSE edge lands under the effect
 
+    `source` (session_key, line_number) is stamped on both the effect
+    and cause claims so their provenance matches the assistant turn
+    they were extracted from.
+
     Returns the list of (cause, effect) texts actually ingested.
     """
     pairs = extractor.find_cause_pairs(text)
     ingested: list[tuple[str, str]] = []
     for cause_text, effect_text in pairs:
         effect_claim = Claim(text=effect_text, voice=voice, lr=lr,
-                             relation="add")
+                             relation="add", source=source)
         effect_result = bella.ingest(effect_claim)
         if not (effect_result.belief and effect_result.field):
             continue
@@ -293,6 +353,7 @@ def ingest_causes(bella: "Bella", extractor: LLMExtractor, text: str,
             text=cause_text, voice=voice, lr=lr, relation="cause",
             target_hint=effect_result.belief.id,
             target_field=effect_result.field,
+            source=source,
         )
         cause_result = bella.ingest(cause_claim)
         if cause_result.belief:
@@ -302,12 +363,15 @@ def ingest_causes(bella: "Bella", extractor: LLMExtractor, text: str,
 
 def ingest_self_observations(bella: "Bella", extractor: LLMExtractor,
                               text: str, *, voice: str = "assistant",
-                              lr: float = 1.5) -> list[str]:
+                              lr: float = 1.5,
+                              source: "tuple[str, int] | None" = None
+                              ) -> list[str]:
     """Extract self-observations and route them to __self__."""
     obs = extractor.find_self_observations(text)
     ingested: list[str] = []
     for o in obs:
-        claim = Claim(text=o, voice=voice, lr=lr, relation="self_observation")
+        claim = Claim(text=o, voice=voice, lr=lr,
+                      relation="self_observation", source=source)
         result = bella.ingest(claim)
         if result.belief:
             ingested.append(o)
@@ -326,3 +390,32 @@ def make_llm_ew_from_env() -> LLMExtractor | None:
     model = os.environ.get("BELLAMEM_EW_LLM_MODEL") or "gpt-4o-mini"
     cache_path = os.environ.get("BELLAMEM_EW_LLM_CACHE_PATH") or None
     return LLMExtractor(model=model, cache_path=cache_path)
+
+
+def make_llm_name_fn(extractor: LLMExtractor, *, top_k: int = 12):
+    """Return a NameFn for core.emerge.emerge() backed by an LLMExtractor.
+
+    Called at most once per garbage field. The contrastive-rate baseline
+    runs first and is passed as the fallback if the LLM returns something
+    unusable (empty, same as original, contains the literal old name).
+    """
+    from ..core.emerge import derive_field_name
+
+    def name_fn(bella, field_name: str) -> str:
+        # Try the deterministic baseline first — if it produces a better
+        # name, we prefer it (cheaper, auditable).
+        baseline = derive_field_name(bella, field_name)
+        if baseline != field_name:
+            return baseline
+        # Baseline failed. Use LLM.
+        g = bella.fields.get(field_name)
+        if g is None:
+            return field_name
+        top = sorted(g.beliefs.values(), key=lambda b: b.mass, reverse=True)[:top_k]
+        descs = [b.desc for b in top if b.desc]
+        suggestion = extractor.suggest_field_name(descs)
+        if not suggestion or suggestion == field_name:
+            return field_name
+        return suggestion
+
+    return name_fn

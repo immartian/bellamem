@@ -13,15 +13,98 @@ Transcript format (observed, 2026-04-09):
 
 We intentionally skip tool_use and tool_result blocks — they are
 ephemeral execution state, not claims.
+
+We also strip harness-injected meta-text (system reminders, command
+echoes, interrupt sentinels) before passing content to the EW. These
+are transport artifacts, not things anyone said. See `_strip_system_noise`.
 """
 
 from __future__ import annotations
 
 import json
 import os
+import re
 from typing import Iterable, Iterator
 
 from ..core.bella import Bella
+
+
+# ---------------------------------------------------------------------------
+# System-noise filter
+# ---------------------------------------------------------------------------
+#
+# The transcript leaks three shapes of meta-text that must not become
+# beliefs:
+#
+#   1. Bracketed sentinels       [Request interrupted by user for tool use]
+#   2. XML-tagged injections     <system-reminder>...</system-reminder>,
+#                                <command-name>, <local-command-stdout>,
+#                                <user-prompt-submit-hook>, etc.
+#   3. Slash-command echoes      Lines that are just "/clear", "/reset" —
+#                                usually already inside <command-name>,
+#                                but safe to drop explicitly.
+#
+# Drop-entire-line patterns are checked first (fast path). Then we strip
+# tagged blocks (multiline) and tagged inline fragments. If the remaining
+# text is empty, the caller skips the turn entirely.
+
+_NOISE_LINE_RE = re.compile(
+    r"^\s*\[(Request interrupted[^\]]*|"
+    r"Tool (?:execution|use)[^\]]*|"
+    r"Command output[^\]]*)\]\s*$",
+    re.I,
+)
+
+_NOISE_TAGS = (
+    "system-reminder",
+    "local-command-stdout",
+    "local-command-stderr",
+    "local-command-caveat",
+    "command-name",
+    "command-message",
+    "command-args",
+    "user-prompt-submit-hook",
+    "function_calls",
+    "function_results",
+)
+
+_NOISE_BLOCK_RE = re.compile(
+    r"<(" + "|".join(_NOISE_TAGS) + r")\b[^>]*>.*?</\1\s*>",
+    re.DOTALL | re.IGNORECASE,
+)
+
+# Self-closing / orphaned opening tags that sometimes appear when the
+# harness truncates a block across turns.
+_NOISE_OPEN_RE = re.compile(
+    r"</?(" + "|".join(_NOISE_TAGS) + r")\b[^>]*/?>",
+    re.IGNORECASE,
+)
+
+_SLASH_CMD_RE = re.compile(r"^\s*/[a-zA-Z][\w\-]*(\s.*)?$")
+
+
+def _strip_system_noise(text: str) -> str:
+    """Remove harness-injected meta-text before EW sees it.
+
+    Returns the cleaned text (may be empty). Callers should treat an
+    empty return as "skip this turn entirely".
+    """
+    if not text:
+        return ""
+    # 1. Strip tagged blocks (multiline-safe)
+    cleaned = _NOISE_BLOCK_RE.sub("", text)
+    # 2. Strip any orphaned open/close tags left over
+    cleaned = _NOISE_OPEN_RE.sub("", cleaned)
+    # 3. Drop noise lines and bare slash commands
+    out_lines: list[str] = []
+    for ln in cleaned.splitlines():
+        if _NOISE_LINE_RE.match(ln):
+            continue
+        if _SLASH_CMD_RE.match(ln) and len(ln.strip()) < 40:
+            # Bare `/clear`, `/reset`, `/loop 5m /foo` — commands, not claims
+            continue
+        out_lines.append(ln)
+    return "\n".join(out_lines).strip()
 
 
 def project_dir_for(cwd: str) -> str:
@@ -101,6 +184,9 @@ def iter_turns(path: str, *, start_line: int = 0
             text = _extract_text(msg)
             if not text or not text.strip():
                 continue
+            text = _strip_system_noise(text)
+            if not text:
+                continue  # turn was pure meta-text — drop it
             voice = "user" if t == "user" else "assistant"
             yield i, voice, text
 
@@ -157,6 +243,7 @@ def ingest_session(bella: Bella, path: str, *, tail: int | None = None,
     )
 
     llm_ew = None if no_llm else make_llm_ew_from_env()
+    session_key = f"jsonl:{path}"
 
     turns = 0
     claims_written = 0
@@ -166,7 +253,13 @@ def ingest_session(bella: Bella, path: str, *, tail: int | None = None,
     self_obs_added = 0
     assistant_pending: list[tuple[str, str]] = []
 
-    def apply_reaction(pending: list[tuple[str, str]], lr: float) -> int:
+    def apply_reaction(pending: list[tuple[str, str]], lr: float,
+                        user_line: int) -> int:
+        """Retroactive ratification. The evidence event is the user turn,
+        so that's the source line we stamp on the accumulate — not the
+        original assistant turn. This preserves "where did the
+        ratification come from?" under `sources` queries.
+        """
         n = 0
         for fname, bid in pending:
             g = bella.fields.get(fname)
@@ -175,7 +268,8 @@ def ingest_session(bella: Bella, path: str, *, tail: int | None = None,
             b = g.beliefs.get(bid)
             if b is None:
                 continue
-            b.accumulate(lr, voice="user")
+            b.accumulate(lr, voice="user",
+                         source=(session_key, user_line))
             n += 1
         return n
 
@@ -183,21 +277,27 @@ def ingest_session(bella: Bella, path: str, *, tail: int | None = None,
         if result.belief and result.field:
             pending.append((result.field, result.belief.id))
 
-    for _lineno, voice, text in iter_new_turns(bella, path, tail=tail):
+    for lineno, voice, text in iter_new_turns(bella, path, tail=tail):
         turns += 1
 
         # 1) User turn: react to the preceding assistant turn first.
         if voice == "user" and assistant_pending:
             reaction = classify_reaction(text)
             if reaction == "affirm":
-                affirmed += apply_reaction(assistant_pending, lr=2.2)
+                affirmed += apply_reaction(assistant_pending, lr=2.2,
+                                            user_line=lineno)
             elif reaction == "correct":
-                corrected += apply_reaction(assistant_pending, lr=0.4)
+                corrected += apply_reaction(assistant_pending, lr=0.4,
+                                            user_line=lineno)
             assistant_pending = []
 
         # 2) Regex EW — handles the common cases for both voices.
         new_pending: list[tuple[str, str]] = []
         for claim in extract_claims(text, voice=voice):
+            # Stamp source AFTER extraction so chat.py stays transport-
+            # agnostic. The adapter is the only place that knows the
+            # transcript line number, and it's authoritative.
+            claim.source = (session_key, lineno)
             result = bella.ingest(claim)
             claims_written += 1
             track(new_pending, result)
@@ -205,10 +305,12 @@ def ingest_session(bella: Bella, path: str, *, tail: int | None = None,
         # 3) LLM EW — scoped to assistant turns with structural markers.
         if llm_ew is not None and voice == "assistant":
             # Causes: effect ingested first, cause attached via target_field
-            cause_pairs = ingest_causes(bella, llm_ew, text, voice=voice)
+            cause_pairs = ingest_causes(bella, llm_ew, text, voice=voice,
+                                         source=(session_key, lineno))
             causes_added += len(cause_pairs)
             # Self-observations: routed directly to __self__ by core
-            obs = ingest_self_observations(bella, llm_ew, text, voice=voice)
+            obs = ingest_self_observations(bella, llm_ew, text, voice=voice,
+                                            source=(session_key, lineno))
             self_obs_added += len(obs)
             # Neither helper currently returns the resulting beliefs for
             # the pending list, so LLM-extracted claims from this turn

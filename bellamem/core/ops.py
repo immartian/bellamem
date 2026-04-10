@@ -38,47 +38,55 @@ class OpResult:
     field: Optional[str] = None  # set by Bella.ingest after routing
 
 
-def confirm(g: Gene, bid: str, voice: str = "", lr: float = 1.5) -> OpResult:
+def confirm(g: Gene, bid: str, voice: str = "", lr: float = 1.5,
+            *, source: Optional[tuple[str, int]] = None) -> OpResult:
     if bid not in g.beliefs:
         return OpResult(OP_CONFIRM, None, f"missing target {bid}")
-    g.confirm(bid, voice=voice, lr=lr)
+    g.confirm(bid, voice=voice, lr=lr, source=source)
     return OpResult(OP_CONFIRM, g.beliefs[bid])
 
 
-def amend(g: Gene, bid: str, detail: str, voice: str = "", lr: float = 1.5) -> OpResult:
+def amend(g: Gene, bid: str, detail: str, voice: str = "", lr: float = 1.5,
+          *, source: Optional[tuple[str, int]] = None) -> OpResult:
     if bid not in g.beliefs:
         return OpResult(OP_AMEND, None, f"missing target {bid}")
-    g.amend(bid, detail, voice=voice, lr=lr)
+    g.amend(bid, detail, voice=voice, lr=lr, source=source)
     return OpResult(OP_AMEND, g.beliefs[bid])
 
 
 def add(g: Gene, desc: str, *, parent: Optional[str] = None, voice: str = "",
         lr: float = 1.5, embedding=None, entity_refs=None,
-        mass_floor: float = 0.0) -> OpResult:
+        mass_floor: float = 0.0,
+        source: Optional[tuple[str, int]] = None) -> OpResult:
     b = g.add(desc, parent=parent, rel=REL_SUPPORT, voice=voice, lr=lr,
-              embedding=embedding, entity_refs=entity_refs, mass_floor=mass_floor)
+              embedding=embedding, entity_refs=entity_refs,
+              mass_floor=mass_floor, source=source)
     return OpResult(OP_ADD, b)
 
 
 def deny(g: Gene, target_bid: str, desc: str, *, voice: str = "", lr: float = 1.5,
-         embedding=None) -> OpResult:
-    b = g.deny(target_bid, desc, voice=voice, lr=lr, embedding=embedding)
+         embedding=None,
+         source: Optional[tuple[str, int]] = None) -> OpResult:
+    b = g.deny(target_bid, desc, voice=voice, lr=lr, embedding=embedding,
+               source=source)
     if b is None:
         return OpResult(OP_DENY, None, f"missing target {target_bid}")
     return OpResult(OP_DENY, b)
 
 
 def cause(g: Gene, effect_bid: str, desc: str, *, voice: str = "", lr: float = 1.5,
-          embedding=None) -> OpResult:
-    b = g.cause(effect_bid, desc, voice=voice, lr=lr, embedding=embedding)
+          embedding=None,
+          source: Optional[tuple[str, int]] = None) -> OpResult:
+    b = g.cause(effect_bid, desc, voice=voice, lr=lr, embedding=embedding,
+                source=source)
     if b is None:
         return OpResult(OP_CAUSE, None, f"missing effect {effect_bid}")
     return OpResult(OP_CAUSE, b)
 
 
 def merge(g: Gene, survivor_bid: str, absorbed_bid: str) -> OpResult:
-    """Fold absorbed into survivor. Voices, log_odds, entities, children
-    all move over. The absorbed belief is removed.
+    """Fold absorbed into survivor. Voices, log_odds, entities, children,
+    and sources all move over. The absorbed belief is removed.
     """
     if survivor_bid not in g.beliefs or absorbed_bid not in g.beliefs:
         return OpResult(OP_MERGE, None, "missing side")
@@ -92,6 +100,17 @@ def merge(g: Gene, survivor_bid: str, absorbed_bid: str) -> OpResult:
     for e in a.entity_refs:
         if e not in s.entity_refs:
             s.entity_refs.append(e)
+    # Combine sources: survivor's existing sources + absorbed's, dedup
+    # preserving order, cap to SOURCES_MAX. Two beliefs saying the same
+    # thing from the same turn should count once, not twice.
+    from .gene import SOURCES_MAX
+    seen_sources = set(s.sources)
+    for src in a.sources:
+        if src not in seen_sources:
+            s.sources.append(src)
+            seen_sources.add(src)
+    if len(s.sources) > SOURCES_MAX:
+        s.sources = s.sources[-SOURCES_MAX:]
     # Reparent absorbed's children to survivor
     for cbid in a.children:
         if cbid in g.beliefs:

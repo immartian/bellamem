@@ -2,13 +2,36 @@
 
 Instead of loading the last N messages, load the highest-mass
 beliefs relevant to the current focus, plus any DISPUTES touching
-it (so rejected approaches are never re-suggested), plus a small
-recency tail.
+it (so rejected approaches are never re-suggested), with a
+continuous freshness bonus blended into the relevance score so
+brand-new beliefs can naturally surface for working-memory queries
+without a separate recency layer.
 
 v0 budget split (tunable):
   60%  high-mass beliefs anywhere (global rules/decisions)
-  30%  field- and neighbor-relevant beliefs
-  10%  recency tail
+  35%  field- and focus-relevant beliefs (with freshness bonus)
+   5%  disputes touching focus
+
+Freshness is NOT a separate layer. A belief's score in the
+relevance layer is:
+
+    score = cosine(focus, belief.embedding)
+          + FRESHNESS_BONUS_MAX * exp(-age / FRESHNESS_HALF_LIFE)
+
+where `age = now - belief.event_time`. This means:
+  - For a focused query ("how should auth tokens be stored?"), a
+    strongly-relevant old belief still wins over a weakly-relevant
+    new one.
+  - For a diffuse query ("what am I currently working on?"), cosine
+    is uniformly low across beliefs and the freshness term dominates,
+    surfacing the working-memory naturally.
+  - The same retrieval function handles both cases — no special
+    "recent layer" and no hand-maintained recency logic.
+
+Principled choice of FRESHNESS_HALF_LIFE: one session's worth of
+time (1 hour). Belief freshness decays to ~0.37 after one hour,
+~0.14 after two hours, essentially zero after four hours. This
+matches "working memory = within the current session" cognitively.
 
 Returns a packed text block ready to drop into a system prompt,
 plus a manifest for programmatic use.
@@ -16,6 +39,7 @@ plus a manifest for programmatic use.
 
 from __future__ import annotations
 
+import math
 import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Optional
@@ -32,13 +56,27 @@ if TYPE_CHECKING:
 # assistant observations ("I tend to X"). Core-owned, not adapter-writable.
 SELF_MODEL_FIELD = "__self__"
 
+# Freshness weighting for the relevance layer. Principled defaults:
+# half_life = 1 hour matches the timescale of a single working session;
+# bonus_max = 0.30 means a brand-new belief gets at most a +0.30 cosine-
+# equivalent boost, which can outrank a weakly-relevant old belief but
+# never a strongly-relevant one.
+FRESHNESS_HALF_LIFE = 3600.0    # seconds
+FRESHNESS_BONUS_MAX = 0.30
+
+
+def _freshness_weight(b: Belief, now: float) -> float:
+    """exp decay on creation time. In [0, 1]. Uses event_time, not last_touched."""
+    age = max(0.0, now - b.event_time)
+    return math.exp(-age / FRESHNESS_HALF_LIFE)
+
 
 @dataclass
 class PackLine:
     field_name: str
     belief: Belief
     score: float
-    bucket: str  # "mass" | "relevant" | "dispute" | "recency"
+    bucket: str  # "mass" | "relevant" | "dispute"
 
     def render(self) -> str:
         b = self.belief
@@ -79,14 +117,25 @@ def _mass_rank(bella: "Bella", q_emb: list[float] | None = None
     return [(f, b, m) for f, b, m, _ in out]
 
 
-def _relevance_rank(bella: "Bella", q_emb: list[float]
+def _relevance_rank(bella: "Bella", q_emb: list[float],
+                    *, include_freshness: bool = True
                     ) -> list[tuple[str, Belief, float]]:
+    """Rank by cosine similarity to focus, with an optional freshness bonus.
+
+    The freshness bonus uses the belief's creation time (event_time),
+    not last_touched, so re-confirming an old belief does NOT make it
+    look fresh. Only genuinely new evidence benefits. See the module
+    docstring for the design rationale.
+    """
+    now = time.time()
     out: list[tuple[str, Belief, float]] = []
     for fname, g in bella.fields.items():
         for b in g.beliefs.values():
             if not b.embedding:
                 continue
             s = cosine(q_emb, b.embedding)
+            if include_freshness:
+                s += FRESHNESS_BONUS_MAX * _freshness_weight(b, now)
             out.append((fname, b, s))
     out.sort(key=lambda t: t[2], reverse=True)
     return out
@@ -111,20 +160,16 @@ def _disputes_touching(bella: "Bella", q_emb: list[float], min_sim: float = 0.2
     return out
 
 
-def _recency_rank(bella: "Bella") -> list[tuple[str, Belief, float]]:
-    out: list[tuple[str, Belief, float]] = []
-    now = time.time()
-    for fname, g in bella.fields.items():
-        for b in g.beliefs.values():
-            age = max(1.0, now - b.last_touched)
-            out.append((fname, b, 1.0 / age))
-    out.sort(key=lambda t: t[2], reverse=True)
-    return out
-
-
 def expand(bella: "Bella", focus: str, budget_tokens: int = 1200,
            *, high_mass_floor: float = 0.65) -> Pack:
     """Build a mass-weighted context pack for the given focus.
+
+    Three layers (no separate recency tail — freshness is blended into
+    the relevance layer's score):
+
+      60%  high-mass global layer (rules/decisions, tie-broken by relevance)
+      35%  relevance layer (cosine + freshness bonus)
+       5%  disputes touching focus
 
     Args:
         bella: the forest
@@ -136,8 +181,8 @@ def expand(bella: "Bella", focus: str, budget_tokens: int = 1200,
     q_emb = embed(focus) if focus else None
 
     q_mass = int(budget_tokens * 0.60)
-    q_rel = int(budget_tokens * 0.30)
-    q_disp_and_recent = budget_tokens - q_mass - q_rel  # 10%
+    q_rel = int(budget_tokens * 0.35)
+    q_disp = budget_tokens - q_mass - q_rel  # 5%
 
     pack = Pack(focus=focus, budget_tokens=budget_tokens)
     seen: set[str] = set()
@@ -166,7 +211,12 @@ def expand(bella: "Bella", focus: str, budget_tokens: int = 1200,
         if mass_used[0] >= q_mass:
             break
 
-    # 2) Field/entity-relevant layer
+    # 2) Relevance layer — cosine to focus + freshness bonus on event_time.
+    # The freshness bonus is what used to be a separate recency tail; it's
+    # now a continuous weight that lets recent beliefs surface on diffuse
+    # queries (cosine is uniformly low → freshness dominates) without
+    # imposing a layer on focused queries where strongly-relevant old
+    # beliefs should win.
     rel_used = [0]
     if q_emb:
         for fname, b, s in _relevance_rank(bella, q_emb):
@@ -178,23 +228,14 @@ def expand(bella: "Bella", focus: str, budget_tokens: int = 1200,
 
     # 3) Disputes touching focus — prevent re-suggesting rejected approaches
     disp_used = [0]
-    disp_budget = q_disp_and_recent // 2
     if q_emb:
         for fname, b, s in _disputes_touching(bella, q_emb):
-            try_add(fname, b, s, "dispute", disp_used, disp_budget)
-            if disp_used[0] >= disp_budget:
+            try_add(fname, b, s, "dispute", disp_used, q_disp)
+            if disp_used[0] >= q_disp:
                 break
 
-    # 4) Recency tail
-    recency_used = [0]
-    recency_budget = q_disp_and_recent - disp_used[0]
-    for fname, b, s in _recency_rank(bella):
-        try_add(fname, b, s, "recency", recency_used, recency_budget)
-        if recency_used[0] >= recency_budget:
-            break
-
     # Sort final lines by (bucket_priority, score desc) for a readable pack
-    bucket_order = {"mass": 0, "dispute": 1, "relevant": 2, "recency": 3}
+    bucket_order = {"mass": 0, "dispute": 1, "relevant": 2}
     pack.lines.sort(key=lambda ln: (bucket_order.get(ln.bucket, 9), -ln.score))
     return pack
 

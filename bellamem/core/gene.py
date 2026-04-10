@@ -46,6 +46,20 @@ REL_COUNTER = "⊥"   # denies / disputes parent
 REL_CAUSE = "⇒"     # causes parent
 
 
+# Bounded history length for Belief.jumps. We don't need the full
+# accumulate log; just enough to detect sign flips and rank recent
+# surprises. 32 covers typical multi-session accumulation without
+# ballooning the snapshot.
+JUMPS_MAX = 32
+
+# Bounded provenance length for Belief.sources. Each source is a
+# (session_key, line_number) tuple recording where an accumulate came
+# from. Same bound as jumps — hot beliefs drop oldest first while
+# always keeping the most recent sources for "where did this come
+# from?" queries.
+SOURCES_MAX = 32
+
+
 @dataclass
 class Belief:
     id: str                                 # stable hash of (desc, parent_id)
@@ -61,6 +75,19 @@ class Belief:
     event_time: float = field(default_factory=time.time)
     last_touched: float = field(default_factory=time.time)
     mass_floor: float = 0.0                 # mass never drops below this (P13)
+    # R1 accumulate history — append-only list of (timestamp, delta_log_odds, voice)
+    # for each accumulate() call. Bounded to JUMPS_MAX (oldest dropped).
+    # Used by core/surprise.py for surprise scoring and sign-flip detection;
+    # the main tree does not depend on it.
+    jumps: list[tuple[float, float, str]] = field(default_factory=list)
+    # Evidence provenance — list of (session_key, line_number) tuples,
+    # one per accumulate that came from a transcript. Programmatic
+    # accumulates (tests, CLI actions) don't add to sources. Bounded
+    # to SOURCES_MAX. Parallel to jumps conceptually, separate in
+    # storage because they answer different questions: jumps = Jaynes
+    # dynamics, sources = "which line of which session did this evidence
+    # come from?"
+    sources: list[tuple[str, int]] = field(default_factory=list)
 
     @property
     def mass(self) -> float:
@@ -79,19 +106,41 @@ class Belief:
         if self.log_odds < floor:
             self.log_odds = floor
 
-    def accumulate(self, lr: float, voice: str = "", *, attenuate_same_voice: float = 0.1) -> None:
-        """R1: add log(lr) to the accumulator. Same-voice evidence is attenuated."""
+    def accumulate(self, lr: float, voice: str = "", *,
+                   attenuate_same_voice: float = 0.1,
+                   source: Optional[tuple[str, int]] = None) -> None:
+        """R1: add log(lr) to the accumulator. Same-voice evidence is attenuated.
+
+        Records each effective step into self.jumps so downstream analysis
+        (core/surprise.py) can weight jumps by prior uncertainty and detect
+        sign flips. The floor clamp is applied AFTER the raw delta is logged
+        so we still see an attempted downward move even if mass_floor caught it.
+
+        If `source` is provided, it is appended to self.sources with
+        SOURCES_MAX bounding. Programmatic accumulates (tests, CLI actions
+        without transcript provenance) should pass source=None.
+        """
         effective_lr = lr
         if voice and voice in self.voices:
             # Same source saying it again — attenuated (SPEC §R1 voice attenuation)
             effective_lr = 1.0 + (lr - 1.0) * attenuate_same_voice
-        self.log_odds += log_lr(effective_lr)
+        delta = log_lr(effective_lr)
+        self.log_odds += delta
         self._enforce_floor()
+        now = time.time()
+        self.jumps.append((now, delta, voice or ""))
+        if len(self.jumps) > JUMPS_MAX:
+            # Drop oldest — we care about recent surprise dynamics
+            self.jumps = self.jumps[-JUMPS_MAX:]
+        if source is not None:
+            self.sources.append(source)
+            if len(self.sources) > SOURCES_MAX:
+                self.sources = self.sources[-SOURCES_MAX:]
         if voice:
             if voice not in self.voices:
                 self.n_voices += 1
             self.voices.add(voice)
-        self.last_touched = time.time()
+        self.last_touched = now
 
     def to_dict(self) -> dict:
         return {
@@ -108,10 +157,28 @@ class Belief:
             "event_time": self.event_time,
             "last_touched": self.last_touched,
             "mass_floor": self.mass_floor,
+            "jumps": [list(j) for j in self.jumps],
+            "sources": [list(s) for s in self.sources],
         }
 
     @classmethod
     def from_dict(cls, d: dict) -> "Belief":
+        raw_jumps = d.get("jumps") or []
+        jumps: list[tuple[float, float, str]] = []
+        for j in raw_jumps:
+            if isinstance(j, (list, tuple)) and len(j) >= 2:
+                ts = float(j[0])
+                delta = float(j[1])
+                voice = str(j[2]) if len(j) >= 3 else ""
+                jumps.append((ts, delta, voice))
+        raw_sources = d.get("sources") or []
+        sources: list[tuple[str, int]] = []
+        for s in raw_sources:
+            if isinstance(s, (list, tuple)) and len(s) >= 2:
+                try:
+                    sources.append((str(s[0]), int(s[1])))
+                except (ValueError, TypeError):
+                    continue
         b = cls(
             id=d["id"],
             desc=d["desc"],
@@ -126,6 +193,8 @@ class Belief:
             event_time=d.get("event_time", time.time()),
             last_touched=d.get("last_touched", time.time()),
             mass_floor=d.get("mass_floor", 0.0),
+            jumps=jumps,
+            sources=sources,
         )
         return b
 
@@ -152,7 +221,8 @@ class Gene:
             rel: str = REL_SUPPORT, voice: str = "", lr: float = 1.5,
             embedding: Optional[list[float]] = None,
             entity_refs: Optional[list[str]] = None,
-            mass_floor: float = 0.0) -> Belief:
+            mass_floor: float = 0.0,
+            source: Optional[tuple[str, int]] = None) -> Belief:
         """Add a belief (or accumulate if it already exists by id).
 
         Returns the resulting Belief. The caller gets a stable reference.
@@ -163,7 +233,7 @@ class Gene:
         bid = belief_id(desc, parent)
         if bid in self.beliefs:
             b = self.beliefs[bid]
-            b.accumulate(lr, voice)
+            b.accumulate(lr, voice, source=source)
             if entity_refs:
                 for e in entity_refs:
                     if e not in b.entity_refs:
@@ -174,7 +244,7 @@ class Gene:
             embedding=embedding, entity_refs=list(entity_refs or []),
             mass_floor=mass_floor,
         )
-        b.accumulate(lr, voice)
+        b.accumulate(lr, voice, source=source)
         self.beliefs[bid] = b
         if parent:
             self.beliefs[parent].children.append(bid)
@@ -182,32 +252,36 @@ class Gene:
             self.roots.append(bid)
         return b
 
-    def confirm(self, bid: str, voice: str = "", lr: float = 1.5) -> None:
+    def confirm(self, bid: str, voice: str = "", lr: float = 1.5,
+                *, source: Optional[tuple[str, int]] = None) -> None:
         if bid in self.beliefs:
-            self.beliefs[bid].accumulate(lr, voice)
+            self.beliefs[bid].accumulate(lr, voice, source=source)
 
-    def amend(self, bid: str, detail: str, voice: str = "", lr: float = 1.5) -> None:
+    def amend(self, bid: str, detail: str, voice: str = "", lr: float = 1.5,
+              *, source: Optional[tuple[str, int]] = None) -> None:
         if bid in self.beliefs:
             b = self.beliefs[bid]
             if detail and detail not in b.desc:
                 b.desc = f"{b.desc}; {detail}"[:200]
-            b.accumulate(lr, voice)
+            b.accumulate(lr, voice, source=source)
 
     def deny(self, target_bid: str, desc: str, *, voice: str = "", lr: float = 1.5,
-             embedding: Optional[list[float]] = None) -> Optional[Belief]:
+             embedding: Optional[list[float]] = None,
+             source: Optional[tuple[str, int]] = None) -> Optional[Belief]:
         """Explicit counter-belief — a ⊥ child of the target."""
         if target_bid not in self.beliefs:
             return None
         return self.add(desc, parent=target_bid, rel=REL_COUNTER,
-                        voice=voice, lr=lr, embedding=embedding)
+                        voice=voice, lr=lr, embedding=embedding, source=source)
 
     def cause(self, effect_bid: str, desc: str, *, voice: str = "", lr: float = 1.5,
-              embedding: Optional[list[float]] = None) -> Optional[Belief]:
+              embedding: Optional[list[float]] = None,
+              source: Optional[tuple[str, int]] = None) -> Optional[Belief]:
         """Causal predecessor — ⇒ child of the effect."""
         if effect_bid not in self.beliefs:
             return None
         return self.add(desc, parent=effect_bid, rel=REL_CAUSE,
-                        voice=voice, lr=lr, embedding=embedding)
+                        voice=voice, lr=lr, embedding=embedding, source=source)
 
     def render(self, *, max_mass_only: float = 0.0, indent: str = "  ") -> str:
         lines: list[str] = []
