@@ -378,7 +378,7 @@ def main(out_dir: Path | None = None) -> None:
     print()
 
     render_svg(bella, out_dir / "example-before.svg",
-               title="BellaMem — one session, ingested")
+               title="Bella — one session, ingested")
 
     # --- phase 2: age + compress ---------------------------------------------
     # Save, load fresh, age, compress, save again.  Using the full round-trip
@@ -400,7 +400,7 @@ def main(out_dir: Path | None = None) -> None:
     print()
 
     render_svg(bella2, out_dir / "example-after.svg",
-               title="BellaMem — same session, thirty days on")
+               title="Bella — same session, thirty days on")
 
     # --- phase 3: the compression summary -----------------------------------
     print("=" * 70)
