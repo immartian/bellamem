@@ -4,6 +4,138 @@ All notable changes will be documented in this file. This project aims
 for [Semantic Versioning](https://semver.org). Until v1.0, everything
 is subject to change.
 
+## [0.1.0] — 2026-04-11 — log-odds decay and the steady state
+
+First version where beliefs fade when nobody talks about them anymore.
+Decay is off-by-default (`BELLAMEM_DECAY=on` to enable); v0.1.0 proves
+the machinery is safe, the on-by-default flip comes in a follow-up
+after a week of dogfood on a 5-minute cron.
+
+### Added
+
+- **`core/decay.py`** — exponential log-odds decay with a single knob
+  (`half_life_days`, default 30). `decay(bella, dt_days)` multiplies
+  every non-exempt belief's `log_odds` by `exp(-dt * ln(2) / τ)`, which
+  pulls mass toward 0.5 (the prior) at a rate set by `τ`. Exempt:
+  reserved-field beliefs (`__self__`, `__user__` etc.), `mass_floor`
+  pins, ⊥ disputes, ⇒ causes. Returns a report with per-belief
+  `QuietFade` entries for any belief that crossed from ratified (≥ 0.55)
+  into limbo (0.45–0.55) on this pass.
+- **`bellamem decay` subcommand** — standalone dry-run preview + `--apply`,
+  with `--dt-override N` for "what if N days of decay right now?"
+  sanity checks. Prints the top movers (by |Δmass|) and any quiet
+  fades.
+- **`BELLAMEM_DECAY=on` gating in `bellamem save`** — when set, each
+  save auto-applies decay for `(now − decayed_at)` before ingest. The
+  snapshot header carries `decayed_at`; pre-v4 snapshots backfill it
+  from `saved_at` on load. Zero-touch migration, no change to
+  `embeddings.bin`.
+- **v3 → v4 snapshot format** — adds `decayed_at` to the header.
+  `load()` handles v3 transparently by treating `decayed_at ==
+  saved_at`. Round-trip tested.
+- **THEORY.md "Decay and reinforcement — the steady state" section.**
+  Works out the collision-math break-even: how many collisions per
+  half-life a belief needs to survive, why reinforcement and decay
+  compose multiplicatively (so 288 saves/day with tiny Δt give the
+  same factor as 1 save/day with big Δt), and the brain analogue.
+  The TL;DR: with `BELLAMEM_DECAY=on` + a 5-minute cron, active topics
+  get topped up continuously while dormant topics bleed off — not as
+  phased passes but as simultaneous dynamics.
+- **`benchmarks/v0.1.0a.md`** — worst-case stress test (one simulated
+  half-life, no reinforcement). Decay did not break retrieval:
+  `expand` held 85% LLM judge (−7pp, within 1-item noise on a 13-item
+  corpus) while cutting `avg_tokens_used` by 31% (1243 t/hit → 927
+  t/hit). No ratified belief crossed into limbo at Δt=30d. Structural
+  ordering preserved: `flat_tail < compact < rag_topk < before_edit
+  ≤ expand`.
+
+### Changed
+
+- **`Bella` forest gains `decayed_at: float`** (default = save time).
+  Round-trip via `store.py` preserves it across save/load.
+
+### Why this matters
+
+v0.0.4rc1 shipped the storage split and the edit guard — things that
+make bellamem feel like a well-behaved Python package. v0.1.0 ships
+the first piece of *dynamics*: the graph now has both reinforcement
+(via new ingest collisions) and forgetting (via decay), and the
+steady state is a real computable point, not a vibe. Everything that
+gets mentioned repeatedly stays high; everything that stops coming
+up fades gently toward 0.5 without ever being "deleted." Prune remains
+the reaper; decay is the upstream slide that makes prune more
+effective without forcing it.
+
+The stress-test bench ran against a throwaway copy of the live
+1834-belief forest with one full half-life applied in a single pass
+— strictly worse than reality, since real operation composes
+reinforcement against decay. v0.1.0 post-dogfood numbers will land
+in `benchmarks/v0.1.0.md`.
+
+### Deliberately not in v0.1.0
+
+- **Decay on-by-default.** Stays gated on `BELLAMEM_DECAY=on` until
+  a week of dogfood validates the steady-state hypothesis on real
+  traffic.
+- **A `bellamem pin` CLI.** Manual pinning was considered and
+  rejected in favor of natural reinforcement via collisions — a
+  belief that actually matters will get re-mentioned and topped up
+  by the next ingest; a belief nobody brings up shouldn't be kept
+  alive by a manual flag.
+- **Recording decay in `jumps`.** Decay is not a Jaynes step — it's
+  a bleed. Putting it in `jumps` would flood the surprise signal
+  with thousands of small fade entries and drown out real updates.
+
+---
+
+## [0.0.4rc1] — 2026-04-10 — storage split + edit guard
+
+Non-vector operations got ~4× faster and the edit-time advisory pack
+became automatic.
+
+### Added
+
+- **v3 split snapshot format.** Belief embeddings moved out of
+  `default.json` into a `default.emb.bin` sidecar. Non-vector
+  operations (`expand`, `audit`, `replay`, `surprises`) stopped
+  having to parse and deserialize the embedding arrays just to read
+  graph structure. Load time on the dogfood forest dropped from
+  ~2s to ~500ms. `load()` and `save()` handle both v2 and v3
+  formats transparently.
+- **`bellamem-guard` PreToolUse hook** (`bellamem/guard.py`,
+  entry point `bellamem-guard` in `pyproject.toml`). Installed as
+  a Claude Code `PreToolUse` hook on `Edit|Write|MultiEdit`, it
+  injects a 5-layer advisory pack (invariants / disputes / causes /
+  bridges / self-model) before every edit and `exit-2`s when the
+  edit re-suggests an approach already rejected by a ⊥ dispute.
+  Boundary-level, not semantic — it sees tool-call text, not model
+  intent — but that's enough to catch re-suggestion of rejected
+  approaches in practice.
+- **Embedder pre-warm in `ingest_session`.** One batched embedder
+  call per save before the turn-loop starts, instead of lazy
+  per-claim dispatch. Cuts save latency for the steady-state case
+  where ingest produces many new claims.
+- **`benchmarks/v0.0.4rc1.md`** — re-run of the bench against the
+  grown 1834-belief forest. `rag_topk` collapsed from 85% → 31%
+  LLM judge as the forest grew (cosine top-k pulls up more
+  plausible-looking-but-wrong neighbors in a larger forest), while
+  `expand` held at 92%. Gap from `expand` to next-best contender
+  widened from 15pp to 61pp. Retrieval code path is unchanged since
+  v0.0.2 — every delta is a property of forest growth, not
+  algorithm changes.
+
+### Why this matters
+
+The storage split is the kind of boring-but-load-bearing fix that
+makes bellamem feel acceptable to run on every `save`. The guard
+closes the remaining gap in the save → clear → resume loop: now
+the agent gets the right context *before* it edits, not just when
+it pauses to recall. And the bench re-run is what proves the
+graph-memory model scales with forest size while cosine top-k
+doesn't — the headline story since v0.0.2.
+
+---
+
 ## [0.0.3rc1] — 2026-04-09 — graph memory, per-project state, slash commands
 
 First **release candidate**. v0.0.3 is the first version where bellamem
