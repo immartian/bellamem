@@ -150,7 +150,27 @@ def list_sessions(cwd: str | None = None) -> list[str]:
     Order is otherwise irrelevant; the normal ingest loop processes every
     file regardless of order.
     """
-    d = project_dir_for(cwd or os.getcwd())
+    # Policy: always discover sessions from the project's canonical
+    # Claude Code workspace (the one slugged from the git root), not
+    # from whichever subfolder the user happened to launch Claude
+    # Code in. The project has one memory, not one per subfolder.
+    # If a caller needs to target a specific cwd — e.g. ingesting a
+    # foreign workspace on purpose — they can still pass `cwd=`
+    # explicitly.
+    if cwd is None:
+        from ..paths import project_root
+        root = str(project_root())
+        here = os.getcwd()
+        if os.path.realpath(here) != os.path.realpath(root):
+            import sys
+            print(
+                f"bellamem: ingesting from canonical workspace {root} "
+                f"(not subfolder cwd {here}) — launch Claude Code from "
+                f"the repo root to have the current session discoverable.",
+                file=sys.stderr,
+            )
+        cwd = root
+    d = project_dir_for(cwd)
     if not os.path.isdir(d):
         return []
     paths = [
@@ -158,6 +178,18 @@ def list_sessions(cwd: str | None = None) -> list[str]:
     ]
     paths.sort(key=lambda p: os.path.getmtime(p))
     return paths
+
+
+def latest_session_key(cwd: str | None = None) -> Optional[str]:
+    """Return the graph session_key (`"jsonl:<path>"`) for the current
+    project's most recently written transcript, or None if there are
+    none. Used by CLI replay/resume to pin the replay target to the
+    current project — without this, `replay._latest_session_key` can
+    pick a cross-project jsonl that was ingested into the graph from
+    a different cwd-encoded Claude Code project dir.
+    """
+    sessions = list_sessions(cwd)
+    return f"jsonl:{sessions[-1]}" if sessions else None
 
 
 def _extract_text(msg: dict) -> str:

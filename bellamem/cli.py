@@ -393,10 +393,11 @@ def cmd_replay(args: argparse.Namespace) -> int:
     if not bella.fields:
         print("empty memory — run `bellamem ingest-cc` first", file=sys.stderr)
         return 1
+    from .adapters.claude_code import latest_session_key
     result = replay(
         bella,
         focus=args.focus,
-        session=args.session,
+        session=args.session or latest_session_key(),
         since_line=args.since_line,
         budget_tokens=args.budget,
     )
@@ -561,10 +562,14 @@ def cmd_resume(args: argparse.Namespace) -> int:
     # Section 1: working memory (replay tail)
     print("## Working memory (replay tail)")
     print()
+    # Pin replay to the current project's latest transcript so a
+    # cross-project jsonl source already in the graph (ingested from
+    # a subfolder Claude Code session) can't win the picker.
+    from .adapters.claude_code import latest_session_key
     replay_result = replay(
         bella,
         focus=None,
-        session=None,
+        session=latest_session_key(),
         since_line=None,
         budget_tokens=args.replay_budget,
     )
