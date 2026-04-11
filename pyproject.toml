@@ -57,8 +57,8 @@ test = ["pytest>=7.0"]
 Homepage = "https://github.com/immartian/bellamem"
 Repository = "https://github.com/immartian/bellamem"
 Issues = "https://github.com/immartian/bellamem/issues"
-Changelog = "https://github.com/immartian/bellamem/blob/main/CHANGELOG.md"
-Architecture = "https://github.com/immartian/bellamem/blob/main/ARCHITECTURE.md"
+Changelog = "https://github.com/immartian/bellamem/blob/master/CHANGELOG.md"
+Architecture = "https://github.com/immartian/bellamem/blob/master/ARCHITECTURE.md"
 
 [project.scripts]
 bellamem = "bellamem.cli:main"
