@@ -1,8 +1,14 @@
 """JSON snapshot persistence.
 
-v3 split format (this file):
+v4 split format (this file):
   <path>.json       graph structure — beliefs without embeddings
   <path>.emb.bin    float32-packed embeddings, keyed by belief id
+
+v4 adds a `decayed_at` wall-clock timestamp to the graph JSON header,
+consumed by core/decay.py to compute the decay Δt on the next save.
+Pre-v4 snapshots are transparently backfilled: `load()` sets
+`bella.decayed_at = saved_at`, so the first decay pass on an upgraded
+snapshot operates on the real time-since-last-write, not "zero".
 
 Rationale: ~68 of the ~81 MB of v2 snapshots was belief embeddings
 stored inline as JSON lists of floats, and most operations (render,
@@ -45,7 +51,7 @@ if TYPE_CHECKING:
     from .bella import Bella
 
 
-SNAPSHOT_VERSION = 3
+SNAPSHOT_VERSION = 4
 
 # ---------------------------------------------------------------------------
 # v3 binary embeddings file format
@@ -226,6 +232,11 @@ def save(bella: "Bella", path: str) -> None:
     d = {
         "version": SNAPSHOT_VERSION,
         "saved_at": time.time(),
+        # decayed_at: wall-clock timestamp of the last decay pass. A
+        # Bella loaded from a pre-v4 snapshot gets this backfilled from
+        # saved_at on load, so the first decay pass operates on the
+        # real time-since-save delta.
+        "decayed_at": bella.decayed_at,
         "embedder": {"name": emb.name, "dim": emb.dim},
         "fields": {
             name: g.to_dict(strip_embedding=True)
@@ -284,6 +295,7 @@ def load_graph_only(path: str) -> "Bella":
         if gd:
             b.fields[name] = Gene.from_dict(gd)
     b.cursor = dict(d.get("cursor", {}))
+    b.decayed_at = float(d.get("decayed_at", d.get("saved_at", time.time())))
     return b
 
 
@@ -340,6 +352,10 @@ def load(path: str) -> "Bella":
         if gd:
             b.fields[name] = Gene.from_dict(gd)
     b.cursor = dict(d.get("cursor", {}))
+    # decayed_at: v4+ field. For older snapshots, backfill from saved_at
+    # so the first decay pass after upgrade computes Δt from the last
+    # time the snapshot was written, not from the current load time.
+    b.decayed_at = float(d.get("decayed_at", d.get("saved_at", time.time())))
 
     # v3: populate embeddings from the sibling bin file.
     if version >= 3:
