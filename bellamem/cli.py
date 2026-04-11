@@ -646,6 +646,25 @@ def cmd_save(args: argparse.Namespace) -> int:
         emerge_report = emerge(bella)
         merged = len(emerge_report.merges)
 
+    # Optional log-odds decay, gated on BELLAMEM_DECAY=on. Runs *after*
+    # emerge so it operates on post-merge beliefs and *before* save so
+    # the persisted snapshot reflects the decayed state. No-op when the
+    # env var is unset or "off" — default-off is intentional for v0.1.0a
+    # until a week of dogfood makes it the default in v0.1.0.
+    decay_report = None
+    if os.environ.get("BELLAMEM_DECAY", "").lower() == "on":
+        import time as _time
+        from .core.decay import apply_decay, DEFAULT_HALF_LIFE_DAYS
+        _now = _time.time()
+        _dt = _now - bella.decayed_at
+        try:
+            _hl = float(os.environ.get("BELLAMEM_DECAY_HALF_LIFE_DAYS",
+                                       DEFAULT_HALF_LIFE_DAYS))
+        except ValueError:
+            _hl = DEFAULT_HALF_LIFE_DAYS
+        decay_report = apply_decay(bella, _dt, _hl)
+        bella.decayed_at = _now
+
     save(bella, snap)
     after = sum(len(g.beliefs) for g in bella.fields.values())
 
@@ -674,6 +693,8 @@ def cmd_save(args: argparse.Namespace) -> int:
     # explicitly want the full audit+surprises report on an unchanged
     # graph (e.g. to re-check entropy signals without adding content).
     if ingested == 0 and merged == 0 and not getattr(args, "force_audit", False):
+        if decay_report is not None:
+            print(f"decay (auto): {decay_report.brief()}")
         print(f"beliefs: {after} (no new content since last save)")
         print(f"snapshot: {snap}")
         print()
@@ -683,6 +704,8 @@ def cmd_save(args: argparse.Namespace) -> int:
 
     if merged:
         print(f"emerge (auto): merged {merged} near-duplicate pair(s)")
+    if decay_report is not None:
+        print(f"decay (auto): {decay_report.brief()}")
     print(
         f"beliefs: {before} → {after_ingest} → {after}"
         f"  (+{ingested} ingested, -{after_ingest - after} merged)"
