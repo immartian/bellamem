@@ -3,11 +3,11 @@
 **Graph memory for agentic coders (Claude Code, Codex soon) — extends
 the effective time horizon ~8×.**
 
-<video src="docs/bella-viz3d.webm" controls width="720"></video>
+<video src="https://github.com/immartian/bellamem/raw/main/docs/bella-viz3d.webm" controls width="720"></video>
 
-*(If the video doesn't render inline on GitHub, open
-[`docs/bella-viz3d.webm`](docs/bella-viz3d.webm) directly — 3D belief
-graph, drag to rotate, replay bar scrubs history.)*
+*(If the video doesn't render inline where you're reading this, open
+[`docs/bella-viz3d.webm`](https://github.com/immartian/bellamem/raw/main/docs/bella-viz3d.webm)
+directly — 3D belief graph, drag to rotate, replay bar scrubs history.)*
 
 > Bella is the visual brand; the Python package and CLI remain
 > `bellamem`. `pipx install bellamem`, then `bellamem save`.
@@ -59,7 +59,7 @@ can't go.
 A full explanation of *why* this works (Jaynes log-odds accumulation,
 Shannon entropy of the mass distribution, the Recursive Emergence
 framing, and a worked flaky-test example with before/after diagrams
-and numbers) lives in [THEORY.md](THEORY.md). The short version: every
+and numbers) lives in [THEORY.md](https://github.com/immartian/bellamem/blob/main/THEORY.md). The short version: every
 belief carries a mass updated by Jaynes's Bayesian rule, the audit's
 "entropy signals" are literal Shannon entropy, and the whole thing is
 a minimal working instance of
@@ -74,7 +74,7 @@ for conversational coding memory.
 no `.venv` to remember, no PATH surgery:
 
 ```bash
-pipx install bellamem                      # once published to PyPI
+pipx install bellamem
 # or, from a local clone:
 git clone https://github.com/immartian/bellamem
 pipx install -e ./bellamem                  # editable install, still global
@@ -250,7 +250,7 @@ of the conversation going inside one session. Bella keeps the
 
 ## Empirical results
 
-Latest measurement: [benchmarks/v0.0.4rc1.md](benchmarks/v0.0.4rc1.md)
+Latest measurement: [benchmarks/v0.0.4rc1.md](https://github.com/immartian/bellamem/blob/main/benchmarks/v0.0.4rc1.md)
 (2026-04-10, budget = 1200 tokens, LLM judge enabled, 13-item
 hand-labeled corpus, 1834-belief forest).
 
@@ -265,7 +265,7 @@ avg tokens used           1200          602         1161         1143          9
 
 `flat_tail (0%) < compact (8%) < rag_topk (31%) < before_edit (69%) < expand (92%)`.
 
-**Headline story — compare to [v0.0.2](benchmarks/v0.0.2.md):** as
+**Headline story — compare to [v0.0.2](https://github.com/immartian/bellamem/blob/main/benchmarks/v0.0.2.md):** as
 the forest grew from the v0.0.2 dogfood snapshot to 1834 beliefs,
 `rag_topk` collapsed from 85% → 31% LLM judge (cosine top-k pulls up
 more plausible-looking-but-wrong neighbors in a larger forest), while
@@ -276,7 +276,7 @@ path (`core/expand.py`, `core/bella.py`) is unchanged between v0.0.2
 and v0.0.4rc1 — every delta is a property of forest growth, not
 algorithm changes.
 
-See [benchmarks/README.md](benchmarks/README.md) for the versioning
+See [benchmarks/README.md](https://github.com/immartian/bellamem/blob/main/benchmarks/README.md) for the versioning
 convention and when to re-run.
 
 ---
@@ -321,7 +321,7 @@ the window manager.
 
 ## Status
 
-**v0.0.4rc1 — alpha, dogfooded on its own construction.** Bella was
+**v0.1.0 — alpha, dogfooded on its own construction.** Bella was
 built in Claude Code sessions that were themselves ingested into the
 Bella being built. When the assistant drifted into an ad-hoc bandaid
 pattern during development, the user's correction landed in the graph
@@ -340,11 +340,18 @@ Since v0.0.2:
   `bellamem-guard` PreToolUse hook ships: advisory pack before
   every edit, exit-2 block on dispute re-suggestions. Embedder
   batching reduces save latency.
-- **v0.1.0 (planned)** — log-odds decay, Three.js 3D viz with
-  temporal replay, and graph-backed compaction as soon as the hook
-  surface allows.
+- **v0.1.0** — log-odds decay gated on `BELLAMEM_DECAY=on`: on every
+  save, non-exempt beliefs fade exponentially toward the 0.5 prior at
+  a 30-day half-life (reserved fields, `mass_floor` pins, ⊥ disputes,
+  and ⇒ causes are exempt). New `bellamem decay` subcommand for
+  dry-run preview + `--apply`. v3 → v4 snapshot format adds a
+  `decayed_at` header. See the "Decay and reinforcement — the steady
+  state" section of THEORY.md for the collision math.
+- **v0.1.1 (planned)** — decay on by default after dogfood validates
+  the steady state, Three.js 3D viz with temporal replay, and
+  graph-backed compaction when the hook surface allows.
 
-See [CHANGELOG.md](CHANGELOG.md) for details.
+See [CHANGELOG.md](https://github.com/immartian/bellamem/blob/main/CHANGELOG.md) for details.
 
 ---
 
@@ -374,7 +381,7 @@ bellamem/
                       surprises / emerge / replay / render / prune
 ```
 
-Full architecture doc: [ARCHITECTURE.md](ARCHITECTURE.md).
+Full architecture doc: [ARCHITECTURE.md](https://github.com/immartian/bellamem/blob/main/ARCHITECTURE.md).
 
 **Architectural invariant**: `bellamem.core` never imports from
 `bellamem.adapters`. Core is domain-agnostic; adapters are where
@@ -391,14 +398,14 @@ is passed in as a callback from the CLI — not imported into core.
 The "why" behind Jaynes log-odds, the Shannon-entropy framing of the
 audit signals, the Recursive Emergence mapping, and a worked
 flaky-test example with before/after diagrams all live in
-**[THEORY.md](THEORY.md)**. If you want to understand the design
+**[THEORY.md](https://github.com/immartian/bellamem/blob/main/THEORY.md)**. If you want to understand the design
 rather than just use the CLI, start there.
 
 ---
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). Short version:
+See [CONTRIBUTING.md](https://github.com/immartian/bellamem/blob/main/CONTRIBUTING.md). Short version:
 
 - The bench is the CI. Run `bellamem bench` after changes to EW,
   expand, or audit and report the delta in the PR.
@@ -415,4 +422,4 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). Short version:
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+MIT. See [LICENSE](https://github.com/immartian/bellamem/blob/main/LICENSE).

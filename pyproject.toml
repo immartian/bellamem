@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "bellamem"
-version = "0.0.4rc1"
+version = "0.1.0"
 description = "A persistent, structured memory for LLM coding agents. Solves the context window problem — retrieves decisive context for each edit under a small token budget, measurably beating flat recency, LLM compact, and classic RAG."
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.10"
 authors = [
-    { name = "bellamem contributors" },
+    { name = "Isaac Mao", email = "isaac.mao@gmail.com" },
 ]
 keywords = [
     "llm",
@@ -68,4 +68,4 @@ bellamem-guard = "bellamem.guard:main"
 include = ["bellamem*"]
 
 [tool.setuptools.package-data]
-bellamem = ["principles/*.md", "templates/*.md"]
+bellamem = ["templates/*.md"]
