@@ -46,6 +46,7 @@ from .paths import (
     default_embed_cache_path,
     default_snapshot_path,
     graph_dir,
+    project_root,
     LEGACY_EMBED_CACHE,
     LEGACY_LLM_EW_CACHE,
     LEGACY_SNAPSHOT,
@@ -1382,8 +1383,11 @@ def main(argv: list[str] | None = None) -> int:
         sys.stdout.reconfigure(line_buffering=True)  # type: ignore[attr-defined]
     except (AttributeError, io.UnsupportedOperation):
         pass
-    # Load .env from cwd if present. Explicit call, not on import.
-    load_dotenv(".env")
+    # Load .env from the project root (same walk-up as default_snapshot_path),
+    # so subfolders inherit the same embedder config as the root. Without this,
+    # running bellamem from any subfolder finds the root snapshot but falls back
+    # to the `hash` embedder, and the snapshot signature check then fails loud.
+    load_dotenv(str(project_root() / ".env"))
     args = build_parser().parse_args(argv)
     # No subcommand → implicit `resume`. Fill in the resume defaults
     # so cmd_resume can read them off args the same way it would if
