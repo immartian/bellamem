@@ -285,20 +285,136 @@ causes, multi-voice ratification, high mass, recent evidence — is
 safe. What's left is the residue: one-off assistant observations that
 nothing ever grabbed onto.
 
-Pruning is **structural**, not **Bayesian**. The principled
-alternative — decaying `log_odds` toward zero over time so beliefs
-regress to the prior without reinforcement — is a v0.1 design
-question: it changes mass under your feet, makes `surprises` noisier,
-and needs a tuned half-life constant. Structural pruning solves the
-visible problem (residue accumulation) without touching the data
-model. The decay version will come when the theory demands it (v0.1.0
-is scheduled to introduce log-odds decay alongside the 3D viz, since
-decay is what gives the z-axis meaningful dynamics).
+Pruning is **structural**, not **Bayesian**. Structural pruning
+solves the visible problem (residue accumulation) at the node level,
+cleanly, without touching the Jaynes accumulator. v0.1.0a adds a
+second, complementary forgetting mechanism — exponential log-odds
+decay — which handles the orthogonal problem of **mass that was
+earned but is no longer exercised**. The next section covers the
+steady-state dynamics.
 
 `bellamem prune` complements `bellamem emerge`: **emerge merges
-duplicates**, **prune removes orphans**. Together they're the full
-consolidation pipeline. Beliefs enter raw, either earn their keep or
-age out, and the long-term graph stays a signal, not a transcript.
+duplicates**, **prune removes orphans**. With v0.1.0a decay added,
+the full consolidation pipeline is: beliefs enter raw, either earn
+their keep or age out (prune), and beliefs that earned their keep
+but stopped being exercised regress toward the prior (decay). The
+long-term graph stays a signal, not a transcript.
+
+---
+
+## Decay and reinforcement — the steady state
+
+Exponential log-odds decay (v0.1.0a, shipped off-by-default under
+`BELLAMEM_DECAY=on`) pulls each non-exempt belief's `log_odds` toward
+zero on every save:
+
+```
+log_odds ← log_odds · exp(-Δt / τ),   τ = half_life_days / ln 2
+```
+
+With `half_life_days = 30`, a belief left alone for 30 days has its
+log_odds halved (mass drifts toward 0.5). A belief left alone for
+60 days has a quarter of its original log_odds. Exponential decay
+is **composable**: 288 tiny passes per day yield the same
+multiplicative factor as one big pass per day, so the frequency of
+saves doesn't change the math — only the Δt.
+
+Decay by itself is only half the story. The other half is
+**reinforcement via ingest collision**: when a new claim embeds
+close enough to an existing belief to route into it, Bella calls
+`accumulate(lr)`, which adds `log(lr)` to the belief's accumulator.
+For the default `lr = 1.5`, that's `≈ 0.405` per collision.
+
+At equilibrium, decay and reinforcement balance out. For a belief
+that collides once every `T` days, the steady-state log_odds solves
+
+```
+x · exp(-T / τ) + log(lr) = x
+```
+
+Plugging in `τ ≈ 43.28 d`, `log(lr) ≈ 0.405`:
+
+| collision interval | steady log_odds | steady mass | verdict |
+|---|---:|---:|---|
+| 7 days  | 3.24 | 0.962 | stays ratified |
+| 30 days | 0.81 | 0.692 | stays above limbo |
+| 60 days | 0.47 | 0.615 | barely above limbo |
+| 90 days | 0.23 | 0.557 | in limbo → prune eligible |
+| 180 days | 0.00 | 0.500 | archaeology |
+
+**A belief that comes up even once every two months naturally
+self-sustains.** A belief that never comes up for six months decays
+to the prior and becomes prune-eligible — at which point `bellamem
+prune` can clean it structurally. This is the "use it or lose it"
+policy in exact, measurable form.
+
+### Why this is more brain-like than pinning
+
+The design question we explicitly rejected was whether to add a
+manual `bellamem pin` command so users could elevate "important"
+decisions into a decay-exempt state. The rejected argument was that
+architectural decisions would silently erode. The accepted argument
+is that **if a decision truly matters, its topic will collide again**
+— and every collision reinforces the belief automatically. If the
+topic never comes up, the decision isn't load-bearing for current
+work, and letting it regress to the prior is honest, not a bug.
+
+This mirrors hippocampal consolidation in the computational
+neuroscience literature: reinforcement and forgetting are **concurrent
+competitive dynamics**, not separate phases. Frequently re-encoded
+memories are protected by their re-encoding rate; rarely re-encoded
+ones are protected by nothing and fade. There is no "important"
+flag, and no curator. The dynamics are the policy.
+
+### Why exponents are the right shape
+
+Linear decay (`log_odds -= k·Δt`) has two failures: it crosses zero
+and overshoots into negative, and its half-life depends on initial
+mass. Exponential decay toward zero is the unique shape that:
+
+1. **Never flips the sign.** Mass asymptotically approaches 0.5
+   from whichever side it started, without crossing.
+2. **Is composable.** Two passes with Δt₁ and Δt₂ equal one pass
+   with Δt₁+Δt₂. Save frequency doesn't matter.
+3. **Is max-entropy.** The belief regresses to its prior (log_odds=0
+   ↔ mass=0.5) which is the only non-informative state consistent
+   with R1 accumulate's prior.
+
+### Interaction with `surprises`
+
+`surprises` reads `belief.jumps` — the log of Jaynes accumulate
+events. Decay does **not** append to jumps. This is an invariant
+from earlier design work: jumps is a record of evidence, decay is a
+silent drift of confidence in the absence of evidence. If decay
+appended to jumps, `surprises` would score drift events the same as
+evidence events and the top-surprises list would flood with fades
+instead of genuine user corrections and sign flips.
+
+A future audit signal ("quiet fades" — beliefs that crossed from
+ratified into limbo via decay alone on the most recent pass) already
+lives in the `DecayReport` returned by `apply_decay` and is
+surfaced at the moment of the save or the manual `bellamem decay`
+run. It is deliberately **not** persisted across sessions: if you
+need to act on a quiet fade, act when you see it. If you don't see
+it, it wasn't load-bearing.
+
+### Continuous vs batched saves
+
+Because exponential decay is composable, Bella gets the same
+long-run state whether it saves once a day or every five minutes —
+so running `bellamem save` on a short cron/systemd timer is
+mathematically equivalent to a resident process, at a fraction of
+the complexity. The actual benefit of frequent saves isn't
+decay-related: it's **reinforcement latency**. A new collision that
+lands in the graph at 12:03 doesn't help until the belief it
+reinforces is persisted, and every query between collisions and
+save is working from stale state.
+
+For v0.1.0a the recommended pattern is a 5–10 minute cron timer
+running `BELLAMEM_DECAY=on bellamem save`. Resident mode (socket,
+daemon, live state) is a v0.2+ design question — worth it only if
+measurement shows the cron approach genuinely bottlenecks the
+reinforcement loop.
 
 ---
 
