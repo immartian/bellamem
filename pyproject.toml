@@ -62,6 +62,7 @@ Architecture = "https://github.com/immartian/bellamem/blob/main/ARCHITECTURE.md"
 
 [project.scripts]
 bellamem = "bellamem.cli:main"
+bellamem-guard = "bellamem.guard:main"
 
 [tool.setuptools.packages.find]
 include = ["bellamem*"]
