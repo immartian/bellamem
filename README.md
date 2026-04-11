@@ -129,6 +129,10 @@ reconstruct *what was decided, what was rejected, and what caused
 what* — in far fewer tokens, and across the session boundaries where
 the left column can't go.
 
+<p align="center">
+  <img src="docs/brand/bella-architecture.svg" alt="Architecture: session history (flat chunks with thin shared bands) flows into the context window (a terminal); Bella extracts structure from the window into a belief hypergraph cube and feeds packs back." width="720"/>
+</p>
+
 And the four items on the right are exactly the ones the agent would
 otherwise forget, re-suggest, or confabulate about tomorrow: a
 ratified decision (mass earned from two voices), a causal chain (the
@@ -337,7 +341,7 @@ sessions on Bella itself, across eight topical fields. Drag to
 rotate; the replay bar scrubs history so you can watch the graph
 accumulate decision by decision.
 
-<a href="https://github.com/immartian/bellamem/raw/main/docs/bella-viz3d.webm">
+<a href="https://github.com/immartian/bellamem/raw/master/docs/bella-viz3d.webm">
   <img src="docs/brand/bella-viz3d-poster.png" alt="3D belief hypergraph viz preview — click to play the .webm" width="720"/>
 </a>
 
@@ -347,7 +351,7 @@ accumulate decision by decision.
 
 ## Empirical results
 
-Latest measurement: [benchmarks/v0.0.4rc1.md](https://github.com/immartian/bellamem/blob/main/benchmarks/v0.0.4rc1.md)
+Latest measurement: [benchmarks/v0.0.4rc1.md](https://github.com/immartian/bellamem/blob/master/benchmarks/v0.0.4rc1.md)
 (2026-04-10, budget = 1200 tokens, LLM judge enabled, 13-item
 hand-labeled corpus, 1834-belief forest).
 
@@ -362,7 +366,7 @@ avg tokens used           1200          602         1161         1143          9
 
 `flat_tail (0%) < compact (8%) < rag_topk (31%) < before_edit (69%) < expand (92%)`.
 
-**Headline story — compare to [v0.0.2](https://github.com/immartian/bellamem/blob/main/benchmarks/v0.0.2.md):** as
+**Headline story — compare to [v0.0.2](https://github.com/immartian/bellamem/blob/master/benchmarks/v0.0.2.md):** as
 the forest grew from the v0.0.2 dogfood snapshot to 1834 beliefs,
 `rag_topk` collapsed from 85% → 31% LLM judge (cosine top-k pulls up
 more plausible-looking-but-wrong neighbors in a larger forest), while
@@ -373,7 +377,7 @@ path (`core/expand.py`, `core/bella.py`) is unchanged between v0.0.2
 and v0.0.4rc1 — every delta is a property of forest growth, not
 algorithm changes.
 
-See [benchmarks/README.md](https://github.com/immartian/bellamem/blob/main/benchmarks/README.md) for the versioning
+See [benchmarks/README.md](https://github.com/immartian/bellamem/blob/master/benchmarks/README.md) for the versioning
 convention and when to re-run.
 
 ---
@@ -448,7 +452,7 @@ Since v0.0.2:
   the steady state, Three.js 3D viz with temporal replay, and
   graph-backed compaction when the hook surface allows.
 
-See [CHANGELOG.md](https://github.com/immartian/bellamem/blob/main/CHANGELOG.md) for details.
+See [CHANGELOG.md](https://github.com/immartian/bellamem/blob/master/CHANGELOG.md) for details.
 
 ---
 
@@ -478,7 +482,7 @@ bellamem/
                       surprises / emerge / replay / render / prune
 ```
 
-Full architecture doc: [ARCHITECTURE.md](https://github.com/immartian/bellamem/blob/main/ARCHITECTURE.md).
+Full architecture doc: [ARCHITECTURE.md](https://github.com/immartian/bellamem/blob/master/ARCHITECTURE.md).
 
 **Architectural invariant**: `bellamem.core` never imports from
 `bellamem.adapters`. Core is domain-agnostic; adapters are where
@@ -495,14 +499,14 @@ is passed in as a callback from the CLI — not imported into core.
 The "why" behind Jaynes log-odds, the Shannon-entropy framing of the
 audit signals, the Recursive Emergence mapping, and a worked
 flaky-test example with before/after diagrams all live in
-**[THEORY.md](https://github.com/immartian/bellamem/blob/main/THEORY.md)**. If you want to understand the design
+**[THEORY.md](https://github.com/immartian/bellamem/blob/master/THEORY.md)**. If you want to understand the design
 rather than just use the CLI, start there.
 
 ---
 
 ## Contributing
 
-See [CONTRIBUTING.md](https://github.com/immartian/bellamem/blob/main/CONTRIBUTING.md). Short version:
+See [CONTRIBUTING.md](https://github.com/immartian/bellamem/blob/master/CONTRIBUTING.md). Short version:
 
 - The bench is the CI. Run `bellamem bench` after changes to EW,
   expand, or audit and report the delta in the PR.
@@ -519,4 +523,4 @@ See [CONTRIBUTING.md](https://github.com/immartian/bellamem/blob/main/CONTRIBUTI
 
 ## License
 
-MIT. See [LICENSE](https://github.com/immartian/bellamem/blob/main/LICENSE).
+MIT. See [LICENSE](https://github.com/immartian/bellamem/blob/master/LICENSE).
