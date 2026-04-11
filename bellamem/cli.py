@@ -827,6 +827,108 @@ def cmd_prune(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_decay(args: argparse.Namespace) -> int:
+    """Log-odds decay: exponentially regress non-exempt beliefs toward the prior.
+
+    Dry-run is the default — users pass `--apply` to actually mutate
+    the snapshot. `--dt-override` simulates a specific wall-clock gap
+    instead of reading (now - bella.decayed_at), which makes the
+    command useful for "what would 30 days of decay do to the current
+    forest?" sanity checks.
+    """
+    import time
+    from .core.decay import (
+        DEFAULT_HALF_LIFE_DAYS,
+        SECONDS_PER_DAY,
+        apply_decay,
+        decay_factor,
+    )
+    from .core.gene import mass_of
+
+    _setup_embedder()
+    snap = _resolve_snapshot(args.snapshot)
+    try:
+        bella = load(snap)
+    except EmbedderMismatch as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 3
+    if not bella.fields:
+        print("empty memory — nothing to decay")
+        return 0
+
+    now = time.time()
+    if args.dt_override is not None:
+        dt_seconds = args.dt_override * SECONDS_PER_DAY
+        dt_source = f"--dt-override {args.dt_override:g}d"
+    else:
+        dt_seconds = now - bella.decayed_at
+        dt_source = f"now - bella.decayed_at"
+
+    if args.stats:
+        days = dt_seconds / SECONDS_PER_DAY
+        factor = decay_factor(dt_seconds, args.half_life)
+        print(f"decayed_at: {bella.decayed_at:.0f}  "
+              f"(age {days:.2f}d)")
+        print(f"half_life:  {args.half_life:g}d")
+        print(f"factor:     {factor:.6f}  "
+              f"(applied to log_odds)")
+        n = sum(len(g.beliefs) for g in bella.fields.values())
+        print(f"beliefs:    {n}")
+        return 0
+
+    # Snapshot the top-N most affected beliefs before mutating, so we
+    # can show a preview of what moves. We track by mass delta so a
+    # high-mass belief dropping a lot shows up even if its log_odds
+    # delta is modest.
+    pre_mass: dict[tuple[str, str], float] = {}
+    for field_name, g in bella.fields.items():
+        for bid, belief in g.beliefs.items():
+            pre_mass[(field_name, bid)] = mass_of(belief.log_odds)
+
+    report = apply_decay(bella, dt_seconds, args.half_life)
+
+    header = (
+        f"bellamem decay  (dt={dt_seconds / SECONDS_PER_DAY:.2f}d "
+        f"[{dt_source}], half_life={args.half_life:g}d, "
+        f"factor={report.factor:.4f})"
+    )
+    print(header)
+    print("=" * len(header))
+    print(f"decayed:     {report.decayed}")
+    print(f"exempt:      {report.exempt}  "
+          f"(reserved fields + mass_floor pins)")
+    print(f"quiet fades: {report.quiet_fades}  "
+          f"(ratified → limbo via decay alone)")
+
+    # Show top movers by |Δmass|.
+    movers: list[tuple[float, str, str, float, float, str]] = []
+    for field_name, g in bella.fields.items():
+        for bid, belief in g.beliefs.items():
+            post = mass_of(belief.log_odds)
+            pre = pre_mass[(field_name, bid)]
+            if pre == post:
+                continue
+            movers.append((abs(pre - post), field_name, bid, pre, post, belief.desc))
+    movers.sort(key=lambda t: -t[0])
+    if movers:
+        print()
+        print("top movers:")
+        for _, fn, _bid, pre, post, desc in movers[:args.top]:
+            short = desc[:60]
+            print(f"  {pre:.3f} → {post:.3f}  [{fn[:20]}]  {short}")
+
+    if not args.apply:
+        print()
+        print("(dry run — pass --apply to persist the decayed snapshot)")
+        return 0
+
+    bella.decayed_at = now
+    save(bella, snap)
+    print()
+    print(f"persisted. snapshot: {snap}")
+    return 0
+
+
 def cmd_render(args: argparse.Namespace) -> int:
     """Render the belief forest to an image (or DOT) via graphviz.
 
@@ -1214,6 +1316,24 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--no-exit-code", action="store_true",
                     help="always exit 0 even if bandaid piles are found")
     sp.set_defaults(func=cmd_audit)
+
+    sp = sub.add_parser(
+        "decay",
+        help="exponential log_odds regress toward prior (v0.1 forgetting)",
+    )
+    sp.add_argument("--apply", action="store_true",
+                    help="persist the decayed snapshot (default: dry run)")
+    sp.add_argument("--half-life", type=float, default=30.0,
+                    help="half-life in days (default 30)")
+    sp.add_argument("--dt-override", type=float, default=None,
+                    help="simulate a specific Δt in days instead of "
+                         "(now - bella.decayed_at); useful for asking "
+                         "'what would 30 days of decay do right now?'")
+    sp.add_argument("--stats", action="store_true",
+                    help="print current decayed_at + factor without mutating")
+    sp.add_argument("--top", type=int, default=15,
+                    help="top-N movers to show in the preview (default 15)")
+    sp.set_defaults(func=cmd_decay)
 
     return p
 
