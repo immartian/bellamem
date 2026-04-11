@@ -53,3 +53,6 @@ llm_ew_cache.json
 
 # Claude Code session transcripts (if ever materialised inside the repo)
 *.jsonl
+
+# Marketing — private, not for public repo
+marketing/

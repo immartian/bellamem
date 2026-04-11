@@ -42,15 +42,23 @@ long-term memory at all.
 **Bella is an attempt to give agents the missing layer — and the
 bridge between the two.**
 
-It's a local, file-backed belief graph that accumulates what matters
-across sessions and topics: the decisions you ratified, the approaches
-you rejected, the causal chains you traced, the patterns you've observed
-in your own behavior. Each belief carries a *mass* — confidence
-accumulated via Jaynes' log-odds from every time the belief was re-said,
-re-confirmed, or contradicted — and typed edges: `→` support,
-`⊥` counter-evidence, `⇒` cause. Beliefs also carry their provenance:
-the session file and line number of every turn that contributed to
-them, so you can always trace a claim back to what was actually said.
+It's a local, file-backed belief hypergraph that accumulates what
+matters across sessions and topics: the decisions you ratified, the
+approaches you rejected, the causal chains you traced, the patterns
+you've observed in your own behavior. Each belief carries a *mass* —
+confidence accumulated via Jaynes' log-odds from every time the belief
+was re-said, re-confirmed, or contradicted — and typed edges: `→`
+support, `⊥` counter-evidence, `⇒` cause. Beliefs also carry their
+provenance: the session file and line number of every turn that
+contributed to them, so you can always trace a claim back to what was
+actually said.
+
+Two structural layers: *inside* a gene (one topical field), a typed
+forest of beliefs with the three edges above; *across* genes, an
+entity index where a single entity referenced by N beliefs in M fields
+defines a hyperedge binding all N together — the R6 *entangle* rule.
+The graph shape is local to a gene; the hypergraph shape is global
+across them.
 
 When an agent is about to act, it doesn't reload the whole tree. It
 calls `expand(focus, budget)` and gets back a tight context pack —
@@ -58,7 +66,7 @@ mass-weighted, dispute-aware, with a continuous freshness bonus so
 recent turns surface naturally without a dedicated "recent layer." The
 same retrieval function answers both *"what did we decide about auth?"*
 (mass dominates) and *"what am I in the middle of?"* (freshness
-dominates). The graph doesn't fight the context window; it compresses
+dominates). The hypergraph doesn't fight the context window; it compresses
 into it, on demand, at query time.
 
 The consolidation story matters as much as the retrieval story. New

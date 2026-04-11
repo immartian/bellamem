@@ -1,70 +1,140 @@
-# Bella
+<p align="center">
+  <img src="docs/brand/bella-logo.svg" alt="Bella — continuous hypergraph memory for AI agents" width="520"/>
+</p>
 
-**Graph memory for agentic coders (Claude Code, Codex soon) — extends
-the effective time horizon ~8×.**
-
-<video src="https://github.com/immartian/bellamem/raw/main/docs/bella-viz3d.webm" controls width="720"></video>
-
-*(If the video doesn't render inline where you're reading this, open
-[`docs/bella-viz3d.webm`](https://github.com/immartian/bellamem/raw/main/docs/bella-viz3d.webm)
-directly — 3D belief graph, drag to rotate, replay bar scrubs history.)*
+**Continuous hypergraph memory for AI agents. Across sessions, across tasks, across domains.**
 
 > Bella is the visual brand; the Python package and CLI remain
 > `bellamem`. `pipx install bellamem`, then `bellamem save`.
 
 ---
 
-## What changes
+## The problem
 
-A normal Claude Code session is a flat sequence of turns. The context
-window holds them in order; when it fills up, the oldest are summarized
-or dropped. Bella runs alongside and extracts the *structure* the turns
-contain — decisions, rejected approaches, cause chains,
-self-observations — into a belief graph that survives session
-boundaries. The same eight turns of a debugging session carry different
-information depending on which shape you keep:
+You use a coding agent every day. You already know the failure modes.
 
+**It loses continuity.** You spent yesterday nailing down why a test
+keeps flaking. Today's session starts fresh — and suggests bumping
+the timeout, the exact bandaid you explicitly rejected yesterday.
+Yesterday doesn't exist.
+
+**It hits the wall.** A long session fills the context window. You
+`/compact` to buy room; you `/clear` to start over. Either way the
+specifics evaporate — the rejected approaches, the causal chains,
+the small invariants that took ten messages to earn.
+
+**It forgets mid-stream.** Even inside a single session, the agent
+loses what it agreed to twenty turns ago. You re-brief, re-anchor,
+re-explain. Dementia in slow motion: it's talking to you with the
+same fluency, but the thing you told it at message 5 isn't in its
+head anymore at message 50.
+
+**It confabulates with conviction.** Worst of all, when it forgets,
+it doesn't say *"sorry, remind me."* It confidently tells you the
+rejected approach like it's new. It asserts a fallacy firmly. It
+isn't asking to be re-briefed — it's wrong with full confidence, and
+*you're* the one who has to catch it every time.
+
+One root cause: **coding agents only have working memory.** The
+context window *is* the memory. When a turn falls out, it falls out
+forever — and the agent carries on unaware, filling the gap with
+plausible-sounding defaults.
+
+**Bella is the long-term memory layer.** It runs alongside the agent,
+extracts the *structure* of every conversation — decisions, rejected
+approaches, causes, self-observations — into a belief hypergraph that
+survives `/clear`, new sessions, and new days. When tomorrow's session
+asks about the flaky test, it doesn't guess. It loads what yesterday
+actually decided, what yesterday rejected, and why.
+
+---
+
+## Before and after
+
+A real debugging session — twenty turns of dead-ends, side-questions,
+acknowledgments, and the actual fix at the end. Left column is what
+the context window holds. Right column is what Bella extracts
+alongside it — and what survives after `/clear`.
+
+<table>
+<tr>
+<th width="50%">Flat session &mdash; what the context window holds</th>
+<th width="50%">Bella hypergraph &mdash; what survives</th>
+</tr>
+<tr>
+<td valign="top">
+
+```text
+user:      test flaked again, 3rd time
+assistant: which one — auth or sync?
+user:      sync_external_api, like last time
+assistant: ok, looking at retry.py
+assistant: timeout hardcoded to 2s. bump to 5s?
+user:      bandaid, don't paper over it
+user:      we need to know WHY it times out
+assistant: fair. tracing retry logic
+assistant: sync retries with 200ms backoff
+assistant: huh, only one retry — that's tight
+user:      CI load? Mondays spike hard
+assistant: checking metrics dashboard...
+assistant: yes — CI hits the rate-limiter
+assistant: first retry hits same limit, fails
+assistant: 2s window exceeded before retry
+user:      real fix: retry jitter, not timeout
+assistant: agreed. patching: backoff ± jitter
+user:      good
+assistant: add latency metrics too?
+user:      not now, focus on the fix
 ```
-Flat recency (what the context window holds)    │  Bella graph (what survives)
-─────────────────────────────────────────────────┼──────────────────────────────────────
-user:      test flaked again, third time        │  ratified: retry-jitter fix
-assistant: I'll bump the timeout to 5s           │    m=0.74  v=2  (user + assistant)
-user:      don't paper over it                   │
-assistant: sync retries at 200ms backoff         │     ⇒  CI load → rate-limit → 2s exceeded
-assistant: CI load spikes, rate-limiting         │
-user:      so the fix is retry jitter            │     ⊥  "bump timeout to 5s"  (rejected)
-assistant: patched retry.py, backoff + jitter    │
-user:      good                                  │   __self__: "I reach for bandaids when
-─────────────────────────────────────────────────┤              retry semantics are the real
-8 turns, ~110 tokens, ordered by time            │              problem"
-                                                 │  ──────────────────────────────────────
-                                                 │  4 beliefs + 2 edge types, ~30 tokens,
-                                                 │  ordered by evidence and structure
+
+</td>
+<td valign="top">
+
+```text
+[retry-jitter is the fix]
+   m=0.74  v=2  (user + assistant)
+
+  ⇒ cause chain
+     CI load → rate-limiter → first retry
+     → 2s window exceeded before retry
+
+  ⊥ rejected
+     "bump timeout from 2s to 5s"
+     (user: "bandaid, not a fix")
+
+  __self__  observation
+     "I reach for timeout bumps when retry
+      semantics are the real problem"
 ```
+
+</td>
+</tr>
+<tr>
+<td>
+
+*~220 tokens · 20 turns · ordered by time · dies at `/clear`*
+
+</td>
+<td>
+
+*~50 tokens · 4 beliefs · ordered by evidence mass · persists*
+
+</td>
+</tr>
+</table>
 
 Same information content, different geometry. The left column lets an
-agent reconstruct *what was said*. The right column lets it reconstruct
-*what was decided, what was rejected, and what caused what* — in a
-tenth the tokens, and across session boundaries where the left column
-can't go.
+agent reconstruct *what was said*. The right column lets it
+reconstruct *what was decided, what was rejected, and what caused
+what* — in far fewer tokens, and across the session boundaries where
+the left column can't go.
 
-**Three retrieval modes answer different questions about the same store:**
-
-| Command | Question |
-|---|---|
-| [`bellamem expand "X"`](#expand-and-before-edit) | *What do we **believe** about X, ranked by importance?* |
-| [`bellamem surprises`](#surprises) | *What just **changed** — what mattered?* |
-| [`bellamem replay [X]`](#replay) | *What did we **say** — in what order?* |
-
-A full explanation of *why* this works (Jaynes log-odds accumulation,
-Shannon entropy of the mass distribution, the Recursive Emergence
-framing, and a worked flaky-test example with before/after diagrams
-and numbers) lives in [THEORY.md](https://github.com/immartian/bellamem/blob/main/THEORY.md). The short version: every
-belief carries a mass updated by Jaynes's Bayesian rule, the audit's
-"entropy signals" are literal Shannon entropy, and the whole thing is
-a minimal working instance of
-[Recursive Emergence](https://github.com/Recursive-Emergence/RE/blob/main/thesis.md)
-for conversational coding memory.
+And the four items on the right are exactly the ones the agent would
+otherwise forget, re-suggest, or confabulate about tomorrow: a
+ratified decision (mass earned from two voices), a causal chain (the
+*why*), a dispute (the rejected bandaid, which Bella's edit guard
+will block if the agent tries it again), and a self-observation about
+its own reasoning pattern.
 
 ---
 
@@ -108,6 +178,17 @@ the git repo root). No other system dependencies.
 ---
 
 ## Quickstart
+
+Three retrieval modes — one for each question you actually ask
+about your memory. Most workflows live in these three commands:
+
+| Command | Question |
+|---|---|
+| `bellamem expand "X"` | *What do we **believe** about X, ranked by importance?* |
+| `bellamem surprises` | *What just **changed** — what mattered?* |
+| `bellamem replay [X]` | *What did we **say** — in what order?* |
+
+Plus utility commands for ingest, audit, render, prune, and bench:
 
 ```bash
 # Ingest Claude Code sessions for the current project.
@@ -245,6 +326,22 @@ and causes an agent actually needs to act.
 The two are complementary, not competing: `/compact` keeps the *feel*
 of the conversation going inside one session. Bella keeps the
 *decisions* available across sessions.
+
+---
+
+## See the graph
+
+A preview of the v0.1.1 3D viz rendering a real Bella belief
+hypergraph — roughly 1,800 beliefs from a month of Claude Code
+sessions on Bella itself, across eight topical fields. Drag to
+rotate; the replay bar scrubs history so you can watch the graph
+accumulate decision by decision.
+
+<a href="https://github.com/immartian/bellamem/raw/main/docs/bella-viz3d.webm">
+  <img src="docs/brand/bella-viz3d-poster.png" alt="3D belief hypergraph viz preview — click to play the .webm" width="720"/>
+</a>
+
+*Click the image above to play the .webm. (GitHub doesn't reliably embed `<video>` tags pointing at raw files, so the poster + link is the universal fallback.)*
 
 ---
 
