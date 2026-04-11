@@ -246,7 +246,7 @@ def to_dot(fields: dict[str, Gene], opts: Optional[RenderOptions] = None) -> str
     selected_ids = {b.id for _, b in selected}
 
     lines: list[str] = []
-    lines.append("digraph BellaMem {")
+    lines.append("digraph Bella {")
     lines.append("  graph [")
     lines.append('    bgcolor="white",')
     lines.append("    overlap=false,")
