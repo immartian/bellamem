@@ -279,7 +279,7 @@ calls that.
 ## [0.0.1] — 2026-04-09 — first dogfood
 
 Initial alpha. Built and validated end-to-end in a single long session
-(see [BENCH.md](BENCH.md) for the numbers). Scope: prove that BELLA's
+(see [benchmarks/v0.0.2.md](benchmarks/v0.0.2.md) for the numbers). Scope: prove that BELLA's
 six-rule calculus works as a memory architecture for LLM coding agents,
 with enough substance to dogfood on its own construction.
 
@@ -362,7 +362,7 @@ flat_tail  13 %   compact  33 %   rag_topk  93 %   expand  100 %   before_edit  
 ```
 
 `before_edit` at 500 tokens reaches 100%; `flat_tail` plateaus at 93%
-and cannot reach 100% at any budget. See [BENCH.md](BENCH.md) for
+and cannot reach 100% at any budget. See [benchmarks/v0.0.2.md](benchmarks/v0.0.2.md) for
 methodology and caveats (self-reference bias, corpus size,
 retrieval-vs-behavior distinction).
 
