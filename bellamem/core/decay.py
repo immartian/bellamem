@@ -55,6 +55,16 @@ QUIET_FADE_LIMBO_HI = 0.55
 
 
 @dataclass
+class QuietFade:
+    """One belief that crossed from ratified into limbo via decay alone."""
+    field_name: str
+    belief_id: str
+    desc: str
+    old_mass: float
+    new_mass: float
+
+
+@dataclass
 class DecayReport:
     """Summary of one decay pass."""
     decayed: int
@@ -63,6 +73,15 @@ class DecayReport:
     factor: float
     dt_seconds: float
     half_life_days: float
+    # Per-belief details for the beliefs that became quiet fades this
+    # pass. Kept local to the pass — not persisted. The caller (save,
+    # decay CLI) prints them at the moment they happen so the user
+    # sees "these used to matter; the next prune may remove them".
+    quiet_fade_entries: list[QuietFade] = None  # type: ignore[assignment]
+
+    def __post_init__(self):
+        if self.quiet_fade_entries is None:
+            self.quiet_fade_entries = []
 
     def brief(self) -> str:
         days = self.dt_seconds / SECONDS_PER_DAY
@@ -119,10 +138,10 @@ def apply_decay(bella: "Bella",
 
     decayed = 0
     exempt = 0
-    quiet_fades = 0
+    quiet_fade_entries: list[QuietFade] = []
 
     for field_name, g in bella.fields.items():
-        for belief in g.beliefs.values():
+        for bid, belief in g.beliefs.items():
             if is_decay_exempt(field_name, belief):
                 exempt += 1
                 continue
@@ -134,14 +153,21 @@ def apply_decay(bella: "Bella",
                 belief.log_odds = new_log_odds
                 if (old_mass >= QUIET_FADE_RATIFIED_MIN and
                         QUIET_FADE_LIMBO_LO <= new_mass <= QUIET_FADE_LIMBO_HI):
-                    quiet_fades += 1
+                    quiet_fade_entries.append(QuietFade(
+                        field_name=field_name,
+                        belief_id=bid,
+                        desc=belief.desc,
+                        old_mass=old_mass,
+                        new_mass=new_mass,
+                    ))
             decayed += 1
 
     return DecayReport(
         decayed=decayed,
         exempt=exempt,
-        quiet_fades=quiet_fades,
+        quiet_fades=len(quiet_fade_entries),
         factor=factor,
         dt_seconds=dt_seconds,
         half_life_days=half_life_days,
+        quiet_fade_entries=quiet_fade_entries,
     )

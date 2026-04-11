@@ -923,6 +923,13 @@ def cmd_decay(args: argparse.Namespace) -> int:
     print(f"quiet fades: {report.quiet_fades}  "
           f"(ratified → limbo via decay alone)")
 
+    if report.quiet_fade_entries:
+        print()
+        print("quiet-fade details (used to matter, now in limbo):")
+        for qf in report.quiet_fade_entries[:args.top]:
+            print(f"  {qf.old_mass:.3f} → {qf.new_mass:.3f}  "
+                  f"[{qf.field_name[:20]}]  {qf.desc[:60]}")
+
     # Show top movers by |Δmass|.
     movers: list[tuple[float, str, str, float, float, str]] = []
     for field_name, g in bella.fields.items():
