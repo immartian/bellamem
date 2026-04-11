@@ -1,0 +1,17 @@
+{
+  "_comment": "Project-level Claude Code settings for bellamem. Dogfoods the PreToolUse guard against bellamem's own development. See bellamem/guard.py. The guard silently no-ops if bellamem-guard isn't on PATH, so cloning the repo without installing bellamem is safe.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bellamem-guard",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

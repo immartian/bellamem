@@ -250,6 +250,43 @@ def save(bella: "Bella", path: str) -> None:
     _write_embeddings_bin(_emb_path(path), _iter_embeddings(), emb.name, emb.dim)
 
 
+def load_graph_only(path: str) -> "Bella":
+    """Read the graph structure WITHOUT loading embeddings.
+
+    Fast path for consumers that only need text, relations, mass, and
+    jumps — no vectors. Skips:
+      - embedder signature check (the caller may be using a different
+        embedder, or no embedder at all, like the PreToolUse guard)
+      - the `<base>.emb.bin` read (Belief.embedding stays None)
+      - any network / import dependency beyond stdlib
+
+    Returns a Bella where `belief.embedding is None` for every belief.
+    Do NOT use this for operations that need vector similarity (expand,
+    recall, ingest routing, audit near-duplicates, viz) — they will
+    degrade silently. Use `load()` for those.
+
+    Designed for `bellamem/guard.py` and anything that needs sub-second
+    graph access without pulling in the embedder stack.
+    """
+    from .bella import Bella
+    from .gene import Gene
+
+    b = Bella()
+    if not os.path.exists(path):
+        return b
+
+    with open(path) as f:
+        d = json.load(f)
+
+    order = d.get("field_order") or list(d.get("fields", {}).keys())
+    for name in order:
+        gd = d["fields"].get(name)
+        if gd:
+            b.fields[name] = Gene.from_dict(gd)
+    b.cursor = dict(d.get("cursor", {}))
+    return b
+
+
 def load(path: str) -> "Bella":
     """Read the forest snapshot.
 
