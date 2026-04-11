@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "bellamem"
-version = "0.0.3rc2"
+version = "0.0.4rc1"
 description = "A persistent, structured memory for LLM coding agents. Solves the context window problem — retrieves decisive context for each edit under a small token budget, measurably beating flat recency, LLM compact, and classic RAG."
 readme = "README.md"
 license = { text = "MIT" }
