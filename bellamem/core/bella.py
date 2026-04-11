@@ -152,6 +152,11 @@ class Bella:
         # cursor: opaque per-source position markers for streaming adapters
         # e.g. {"jsonl:/path/to/session.jsonl": {"offset": 12345}}
         self.cursor: dict[str, dict] = {}
+        # decayed_at: wall-clock timestamp of the last decay pass (v4+).
+        # Used by core/decay.py to compute Δt on the next save. A fresh
+        # Bella starts at now(), so the first decay pass after load
+        # operates on the wall-clock gap since that save.
+        self.decayed_at: float = time.time()
         # entity_index: read-side cache, rebuilt from belief.entity_refs.
         # Maps entity_ref → list of (field_name, belief_id) that mention it.
         # Not persisted — rebuilt lazily on first access after load.
