@@ -8,6 +8,7 @@ the named release.
 
 | Version | File | Retrieval code at | Notes |
 |---|---|---|---|
+| v0.1.0a  | [v0.1.0a.md](v0.1.0a.md)   | unchanged from v0.0.2 | Decay stress test: worst-case `--dt-override 30d` against a scratch copy of the forest. `expand` tokens −31% for −7pp judge (1 item, noise floor); `before_edit` +8pp (1 item). Ordering preserved. Realistic steady-state comes in v0.1.0.md post-dogfood. |
 | v0.0.4rc1 | [v0.0.4rc1.md](v0.0.4rc1.md) | unchanged from v0.0.2 | Re-run against the grown 1834-belief forest. `rag_topk` collapsed (85→31 judge) as the forest grew; `expand` held (100→92). Gap from `expand` to next-best contender widened from 15pp to 61pp. |
 | v0.0.2 | [v0.0.2.md](v0.0.2.md) | `expand` / `expand_before_edit` as shipped in v0.0.2 | Initial dogfood benchmark: 13 hand-labeled queries. 5 contenders (flat_tail / compact / rag_topk / expand / before_edit). |
 
