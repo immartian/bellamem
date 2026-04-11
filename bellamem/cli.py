@@ -27,6 +27,7 @@ import io
 import os
 import sys
 
+from . import __version__
 from .core import Bella, save, load
 from .core.audit import audit, render_report
 from .core.embed import (
@@ -1078,6 +1079,7 @@ def cmd_embedder(args: argparse.Namespace) -> int:
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="bellamem",
                                  description="local accumulating memory for LLM agents")
+    p.add_argument("--version", action="version", version=f"bellamem {__version__}")
     p.add_argument("--snapshot", help="snapshot path (default: <project>/.graph/default.json)")
     # The subcommand is optional — `bellamem` with no args routes to
     # `bellamem resume`. This lets the Claude Code slash command pass
