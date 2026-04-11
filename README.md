@@ -250,40 +250,34 @@ of the conversation going inside one session. Bella keeps the
 
 ## Empirical results
 
-From [benchmarks/v0.0.2.md](benchmarks/v0.0.2.md), measured on 15 hand-labeled queries drawn
-from a real 98-turn dogfood session (measured at v0.0.2). **The
-retrieval code path — `expand` and `expand_before_edit` — has not
-changed in v0.0.3 or v0.0.4rc1**, so these numbers still represent
-current retrieval quality. Releases since v0.0.2 were scoped to
-storage (v3 split format), runtime (edit guard), and latency (embedder
-batching), not retrieval.
-
-| budget | flat_tail | before_edit |
-|---|---|---|
-| 200 t  | —    | **80 %** |
-| 500 t  | 13 % | **100 %** |
-| 1000 t | 13 % | 100 % |
-| 2000 t | 13 % | 100 % |
-| 4000 t | 93 %*| 100 % |
-| 10000 t| 93 %*| 100 % |
-
-*\*self-referential lift — at ≥3000t the flat tail reaches back into
-the turn where the bench corpus was drafted. Clean comparison: **500
-tokens structured beats infinite flat recency**.*
-
-All five contenders at 1200 tokens:
+Latest measurement: [benchmarks/v0.0.4rc1.md](benchmarks/v0.0.4rc1.md)
+(2026-04-10, budget = 1200 tokens, LLM judge enabled, 13-item
+hand-labeled corpus, 1834-belief forest).
 
 ```
-              flat_tail  compact  rag_topk  expand  before_edit
-exact hit        13 %     33 %     93 %     100 %    100 %
-embed hit        33 %     73 %    100 %     100 %    100 %
-avg tokens     1200      725      1175     1167      853
+metric               flat_tail      compact     rag_topk       expand  before_edit
+----------------------------------------------------------------------------------
+exact hit rate            15 %          0 %         15 %         69 %         46 %
+embed hit rate            23 %         31 %         31 %         85 %         77 %
+llm judge rate             0 %          8 %         31 %         92 %         69 %
+avg tokens used           1200          602         1161         1143          964
 ```
 
-`flat_tail << compact << rag_topk < expand ≈ before_edit`. Full
-methodology in [benchmarks/v0.0.2.md](benchmarks/v0.0.2.md). See
-[benchmarks/README.md](benchmarks/README.md) for the versioning
-convention.
+`flat_tail (0%) < compact (8%) < rag_topk (31%) < before_edit (69%) < expand (92%)`.
+
+**Headline story — compare to [v0.0.2](benchmarks/v0.0.2.md):** as
+the forest grew from the v0.0.2 dogfood snapshot to 1834 beliefs,
+`rag_topk` collapsed from 85% → 31% LLM judge (cosine top-k pulls up
+more plausible-looking-but-wrong neighbors in a larger forest), while
+`expand` held at 92%. The gap from `expand` to the next-best contender
+widened from **15pp to 61pp**. Structured mass-weighted retrieval
+scales with forest size; cosine top-k doesn't. The retrieval code
+path (`core/expand.py`, `core/bella.py`) is unchanged between v0.0.2
+and v0.0.4rc1 — every delta is a property of forest growth, not
+algorithm changes.
+
+See [benchmarks/README.md](benchmarks/README.md) for the versioning
+convention and when to re-run.
 
 ---
 
