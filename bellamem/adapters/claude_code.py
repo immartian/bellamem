@@ -280,6 +280,53 @@ def ingest_session(bella: Bella, path: str, *, tail: int | None = None,
     llm_ew = None if no_llm else make_llm_ew_from_env()
     session_key = f"jsonl:{path}"
 
+    # Materialize all new turns up-front so we can do a single batched
+    # embedder warm-up before the per-turn ingest loop runs. This
+    # matters because the loop used to pay a ~300 ms OpenAI round-trip
+    # per new claim; with 30+ claims per save the embedder latency
+    # dominated the whole save. One batched call via `embed_batch`
+    # consolidates all misses into a single OpenAI request (up to 1024
+    # texts per batch, per OpenAIEmbedder.BATCH_CAP), and the per-turn
+    # `bella.ingest()` calls below become disk-cache hits.
+    #
+    # iter_new_turns has a side-effect (it advances the cursor) so we
+    # only call it once — materialising into a list is essential here.
+    all_new_turns: list[tuple[int, str, str]] = list(
+        iter_new_turns(bella, path, tail=tail)
+    )
+
+    if all_new_turns:
+        # Pre-warm: collect all claim texts from the regex EW across
+        # both user and assistant turns. LLM EW extractions are NOT
+        # warmed here — their claim texts depend on the LLM's output
+        # and aren't known until after the LLM call. Batching those is
+        # a separate concern (LLM EW parallelism, deferred).
+        warm_texts: set[str] = set()
+        for _, voice, text in all_new_turns:
+            for claim in extract_claims(text, voice=voice):
+                t = (claim.text or "").strip()
+                if t:
+                    warm_texts.add(t)
+        if warm_texts:
+            from ..core.embed import current_embedder
+            emb = current_embedder()
+            if hasattr(emb, "embed_batch"):
+                # Return value is discarded — we're only here for the
+                # cache side-effect. Misses go through a single batched
+                # API call; hits are no-ops. DiskCacheEmbedder flushes
+                # the cache to disk at the SAVE_INTERVAL threshold
+                # automatically.
+                try:
+                    emb.embed_batch(list(warm_texts))
+                except Exception as e:
+                    # Never fail a save on a warm-up error — the
+                    # per-turn loop will retry one claim at a time and
+                    # surface any real problem there.
+                    print(
+                        f"bellamem: warning: embedder pre-warm failed "
+                        f"({e}). Per-claim fallback will apply.",
+                    )
+
     turns = 0
     claims_written = 0
     affirmed = 0
@@ -312,7 +359,7 @@ def ingest_session(bella: Bella, path: str, *, tail: int | None = None,
         if result.belief and result.field:
             pending.append((result.field, result.belief.id))
 
-    for lineno, voice, text in iter_new_turns(bella, path, tail=tail):
+    for lineno, voice, text in all_new_turns:
         turns += 1
 
         if on_progress is not None and turns % PROGRESS_EVERY_N_TURNS == 0:
