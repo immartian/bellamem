@@ -142,8 +142,13 @@ class Belief:
             self.voices.add(voice)
         self.last_touched = now
 
-    def to_dict(self) -> dict:
-        return {
+    def to_dict(self, *, strip_embedding: bool = False) -> dict:
+        """Serialize. `strip_embedding=True` omits the embedding field so
+        it can be persisted separately in the v3+ split snapshot format
+        (see core/store.py). `from_dict` handles a missing embedding
+        gracefully — the store layer populates it after JSON load.
+        """
+        d = {
             "id": self.id,
             "desc": self.desc,
             "parent": self.parent,
@@ -152,7 +157,6 @@ class Belief:
             "voices": sorted(self.voices),
             "log_odds": self.log_odds,
             "n_voices": self.n_voices,
-            "embedding": self.embedding,
             "entity_refs": list(self.entity_refs),
             "event_time": self.event_time,
             "last_touched": self.last_touched,
@@ -160,6 +164,9 @@ class Belief:
             "jumps": [list(j) for j in self.jumps],
             "sources": [list(s) for s in self.sources],
         }
+        if not strip_embedding:
+            d["embedding"] = self.embedding
+        return d
 
     @classmethod
     def from_dict(cls, d: dict) -> "Belief":
@@ -309,12 +316,18 @@ class Gene:
         dim = len(embs[0])
         return [sum(e[i] for e in embs) / len(embs) for i in range(dim)]
 
-    def to_dict(self) -> dict:
+    def to_dict(self, *, strip_embedding: bool = False) -> dict:
+        """Forward `strip_embedding` through to each belief. Used by the
+        v3+ split snapshot format (core/store.py).
+        """
         return {
             "name": self.name,
             "created_at": self.created_at,
             "roots": list(self.roots),
-            "beliefs": {bid: b.to_dict() for bid, b in self.beliefs.items()},
+            "beliefs": {
+                bid: b.to_dict(strip_embedding=strip_embedding)
+                for bid, b in self.beliefs.items()
+            },
         }
 
     @classmethod
