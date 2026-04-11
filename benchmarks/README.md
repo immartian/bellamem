@@ -8,7 +8,8 @@ the named release.
 
 | Version | File | Retrieval code at | Notes |
 |---|---|---|---|
-| v0.0.2 | [v0.0.2.md](v0.0.2.md) | `expand` / `expand_before_edit` as shipped in v0.0.2 | Initial dogfood benchmark: 15 hand-labeled queries against a 98-turn real session. 5 contenders (flat_tail / compact / rag_topk / expand / before_edit). |
+| v0.0.4rc1 | [v0.0.4rc1.md](v0.0.4rc1.md) | unchanged from v0.0.2 | Re-run against the grown 1834-belief forest. `rag_topk` collapsed (85→31 judge) as the forest grew; `expand` held (100→92). Gap from `expand` to next-best contender widened from 15pp to 61pp. |
+| v0.0.2 | [v0.0.2.md](v0.0.2.md) | `expand` / `expand_before_edit` as shipped in v0.0.2 | Initial dogfood benchmark: 13 hand-labeled queries. 5 contenders (flat_tail / compact / rag_topk / expand / before_edit). |
 
 ## When to add a new entry
 
