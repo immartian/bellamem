@@ -5,9 +5,8 @@
 *.key
 *.pem
 
-# Agent local state (keep settings.json for the bellamem-guard hook)
-.claude/*
-!.claude/settings.json
+# Agent local state
+.claude/
 .codex/
 
 # Python
