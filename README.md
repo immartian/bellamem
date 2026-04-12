@@ -2,7 +2,7 @@
   <img src="docs/brand/bella-logo.svg" alt="Bella — continuous hypergraph memory for AI agents" width="520"/>
 </p>
 
-**Continuous hypergraph memory for AI agents. Across sessions, across tasks, across domains.**
+**RAG retrieves documents. Agents need to retrieve beliefs.**
 
 > Bella is the visual brand; the Python package and CLI remain
 > `bellamem`. `pipx install bellamem`, then `bellamem save`.
@@ -11,41 +11,33 @@
 
 ## The problem
 
-You use a coding agent every day. You already know the failure modes.
+Your AI agent is like a brilliant intern with amnesia. Every morning
+you re-explain the project. Every afternoon it re-introduces the bug
+you fixed yesterday. It smiles and nods and produces confidently wrong
+output. Fluent, agreeable, and fundamentally untrustworthy.
 
-**It loses continuity.** You spent yesterday nailing down why a test
-keeps flaking. Today's session starts fresh — and suggests bumping
-the timeout, the exact bandaid you explicitly rejected yesterday.
-Yesterday doesn't exist.
+**Loses continuity.** Today's session suggests the exact bandaid you
+rejected yesterday. Yesterday doesn't exist.
 
-**It hits the wall.** A long session fills the context window. You
-`/compact` to buy room; you `/clear` to start over. Either way the
-specifics evaporate — the rejected approaches, the causal chains,
-the small invariants that took ten messages to earn.
+**Hits the wall.** `/compact` and `/clear` evaporate the specifics —
+rejected approaches, causal chains, small invariants that took ten
+messages to earn.
 
-**It forgets mid-stream.** Even inside a single session, the agent
-loses what it agreed to twenty turns ago. You re-brief, re-anchor,
-re-explain. Dementia in slow motion: it's talking to you with the
-same fluency, but the thing you told it at message 5 isn't in its
-head anymore at message 50.
+**Confabulates with conviction.** When it forgets, it doesn't ask to
+be reminded. It re-asserts the wrong approach with full confidence,
+and *you're* the one who has to catch it every time.
 
-**It confabulates with conviction.** Worst of all, when it forgets,
-it doesn't say *"sorry, remind me."* It confidently tells you the
-rejected approach like it's new. It asserts a fallacy firmly. It
-isn't asking to be re-briefed — it's wrong with full confidence, and
-*you're* the one who has to catch it every time.
+One root cause: **agents only have working memory.** The context
+window *is* the memory. When a turn falls out, it's gone — and the
+agent carries on unaware, filling the gap with plausible defaults.
+You can't guardrail a system that doesn't own its own beliefs.
 
-One root cause: **coding agents only have working memory.** The
-context window *is* the memory. When a turn falls out, it falls out
-forever — and the agent carries on unaware, filling the gap with
-plausible-sounding defaults.
-
-**Bella is the long-term memory layer.** It runs alongside the agent,
-extracts the *structure* of every conversation — decisions, rejected
-approaches, causes, self-observations — into a belief hypergraph that
-survives `/clear`, new sessions, and new days. When tomorrow's session
-asks about the flaky test, it doesn't guess. It loads what yesterday
-actually decided, what yesterday rejected, and why.
+**Bella is the long-term memory layer.** It extracts the *structure*
+of every conversation — decisions, rejected approaches, causes,
+self-observations — into a belief hypergraph that survives `/clear`,
+new sessions, and new days. When tomorrow's session asks about the
+flaky test, it loads what yesterday decided, what yesterday rejected,
+and why.
 
 ---
 
@@ -321,15 +313,11 @@ Both compress a long session. The difference is load-bearing:
 | **Loses** | Identifiers, ⊥ corrections, causal structure | Tool outputs, file contents, conversational texture |
 | **Cross-session** | None — dies with the session | Full — graph persists, next session inherits it |
 
-On our bench, the compact-style contender (`gpt-4o-mini` summary)
-scored **8% LLM-judge rate**; Bella's `expand` scored **92%** at a
-comparable budget. The structural weakness of narrative summaries is
-that they preserve themes but lose the specific decisions, corrections,
-and causes an agent actually needs to act.
-
-The two are complementary, not competing: `/compact` keeps the *feel*
-of the conversation going inside one session. Bella keeps the
-*decisions* available across sessions.
+On our 13-item bench, compact scored **8%** LLM-judge; Bella's
+`expand` scored **92%**. Narrative summaries preserve themes;
+structured retrieval preserves decisions. The two are complementary:
+`/compact` keeps the *feel* inside one session; Bella keeps the
+*decisions* across sessions.
 
 ---
 
@@ -456,41 +444,15 @@ See [CHANGELOG.md](https://github.com/immartian/bellamem/blob/master/CHANGELOG.m
 
 ---
 
-## Architecture at a glance
+## Architecture
 
-```
-bellamem/
-  core/
-    gene.py           Belief + Gene + Jaynes accumulation + jumps + sources
-    ops.py            the seven operations: CONFIRM, AMEND, ADD, DENY,
-                      CAUSE, MERGE, MOVE (complete mutation API)
-    bella.py          forest + routing + entity index
-    embed.py          pluggable embedders (Hash/ST/OpenAI) + .env
-    store.py          v3 split snapshot (graph JSON + embeddings.bin) + signature check
-    expand.py         expand() + expand_before_edit() with freshness weight
-    emerge.py         R3 consolidation — merge + rename
-    audit.py          entropy signals: piles, glut, duplicates, limbo, names
-    surprise.py       top Jaynes jumps + sign flips + dispute formations
-    replay.py         chronological retrieval from source-grounded beliefs
-  adapters/
-    chat.py           voice-aware regex EW + turn-pair reaction classifier
-    claude_code.py    .jsonl reader + system-noise filter + source stamping
-    llm_ew.py         gpt-4o-mini CAUSE + self-observation + field naming
-  guard.py            bellamem-guard PreToolUse hook entry point
-  bench.py            5 contenders, 2 metrics, comparison table
-  cli.py              save / expand / before-edit / audit / bench /
-                      surprises / emerge / replay / render / prune
-```
+`bellamem.core` (Jaynes accumulation, expand, audit, prune, replay)
+never imports from `bellamem.adapters` (Claude Code reader, LLM EW,
+turn-pair classifier). Core is domain-agnostic; adapters are where
+domain knowledge lives. Seven mutation operations, pluggable
+embedders, split snapshot storage.
 
-Full architecture doc: [ARCHITECTURE.md](https://github.com/immartian/bellamem/blob/master/ARCHITECTURE.md).
-
-**Architectural invariant**: `bellamem.core` never imports from
-`bellamem.adapters`. Core is domain-agnostic; adapters are where
-domain knowledge lives. This lets the same core run on news, personal
-knowledge, or support tickets — anything that accumulates evidence.
-When a core function needs an LLM-backed refinement (e.g. field naming
-when contrastive analysis can't tell two fields apart), the refinement
-is passed in as a callback from the CLI — not imported into core.
+Full file tree and invariants: **[ARCHITECTURE.md](https://github.com/immartian/bellamem/blob/master/ARCHITECTURE.md)**.
 
 ---
 
