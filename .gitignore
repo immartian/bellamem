@@ -5,6 +5,10 @@
 *.key
 *.pem
 
+# Claude Code local state (keep settings.json for the bellamem-guard hook)
+.claude/*
+!.claude/settings.json
+
 # Python
 __pycache__/
 *.py[cod]
