@@ -2,7 +2,7 @@
   <img src="docs/brand/bella-logo.svg" alt="Bella — continuous hypergraph memory for AI agents" width="520"/>
 </p>
 
-**RAG retrieves documents. Agents need to retrieve beliefs.**
+**~~RAG retrieves documents.~~ Agents need to retrieve beliefs.**
 
 > Bella is the visual brand; the Python package and CLI remain
 > `bellamem`. `pipx install bellamem`, then `bellamem save`.
