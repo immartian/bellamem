@@ -7,7 +7,7 @@ name = "bellamem"
 version = "0.1.0"
 description = "A persistent, structured memory for LLM coding agents. Solves the context window problem — retrieves decisive context for each edit under a small token budget, measurably beating flat recency, LLM compact, and classic RAG."
 readme = "README.md"
-license = { text = "MIT" }
+license = { text = "AGPL-3.0-or-later" }
 requires-python = ">=3.10"
 authors = [
     { name = "Isaac Mao", email = "isaac.mao@gmail.com" },
@@ -26,7 +26,7 @@ keywords = [
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
+    "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3 :: Only",

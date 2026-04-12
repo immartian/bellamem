@@ -492,4 +492,4 @@ See [CONTRIBUTING.md](https://github.com/immartian/bellamem/blob/master/CONTRIBU
 
 ## License
 
-MIT. See [LICENSE](https://github.com/immartian/bellamem/blob/master/LICENSE).
+AGPL-3.0-or-later. See [LICENSE](https://github.com/immartian/bellamem/blob/master/LICENSE).
