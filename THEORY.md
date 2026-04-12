@@ -1,138 +1,24 @@
-# Theory — Why Bella Works
+# Implementation Notes — How bellamem Realizes BELLA
 
-Bella is a concrete instance of three ideas. None are original; the
-work is assembling them into a queryable substrate for one specific
-kind of memory.
+This document explains the specific choices bellamem makes to
+implement the [BELLA formal calculus](bella/SPEC.md). For the
+theory itself — the six rules, the Bayesian grounding, the
+consciousness framing, the domain-agnostic case studies — see:
 
-- [How do we think?](#how-do-we-think) — the missing layer
-- [Why it works: Jaynes × Shannon × Recursive Emergence](#why-it-works-jaynes--shannon--recursive-emergence)
+- **[bella/SPEC.md](bella/SPEC.md)** — the six rules, invariants, formal definitions
+- **[bella/VISION.md](bella/VISION.md)** — theoretical grounding (Jaynes, Gödel, self-reference)
+- **[bella/EXAMPLES.md](bella/EXAMPLES.md)** — domain-agnostic case studies (H. pylori, continental drift, …)
+- **[bella/MEMORY.md](bella/MEMORY.md)** — how BELLA maps to LLM agent memory
+
+What follows is implementation-specific: the thresholds bellamem
+chose, the data structures it uses, the tradeoffs it made, and
+auditable worked examples with real numbers from the running code.
+
 - [A worked example: one session, compressed](#a-worked-example-one-session-compressed)
 - [The six rules, operationally](#the-six-rules-operationally)
 - [Consolidation as state, not layer](#consolidation-as-state-not-layer)
 - [Forgetting — structural vs Bayesian decay](#forgetting--structural-vs-bayesian-decay)
 - [Provenance (source grounding)](#provenance-source-grounding)
-
----
-
-## How do we think?
-
-We remember something from long before — a rule we learned years ago, a
-correction from last quarter, a bug we fixed in a codebase we haven't
-touched in months — and yet in the very same moment we hold the exact
-sentence we just heard, the line of code we're about to edit, the
-question still hanging in the air. Kahneman called it fast and slow.
-The quieter way to say it: we have working memory and long-term memory,
-and the remarkable thing isn't that we have both — it's that we compose
-them seamlessly. The invariant you learned a decade ago and the word
-someone said two seconds ago both land in your attention together,
-weighted by relevance to what you're doing right now. No special layer
-for "recent," no separate storage for "important." One mind, two
-consolidation states, one composed answer.
-
-LLM coding agents don't think this way. They have one layer: the context
-window. Everything in it is "now"; everything outside it is gone. When
-the window fills, `/compact` summarizes the tail and the specifics
-disappear. When a session ends, the decisions evaporate. The next
-session asks the same questions that were answered yesterday, makes the
-same mistakes that were corrected last week, re-suggests approaches the
-user already rejected — because nothing persisted between the flat tail
-and the empty start. The agent has a kind of working memory. It has no
-long-term memory at all.
-
-**Bella is an attempt to give agents the missing layer — and the
-bridge between the two.**
-
-It's a local, file-backed belief hypergraph that accumulates what
-matters across sessions and topics: the decisions you ratified, the
-approaches you rejected, the causal chains you traced, the patterns
-you've observed in your own behavior. Each belief carries a *mass* —
-confidence accumulated via Jaynes' log-odds from every time the belief
-was re-said, re-confirmed, or contradicted — and typed edges: `→`
-support, `⊥` counter-evidence, `⇒` cause. Beliefs also carry their
-provenance: the session file and line number of every turn that
-contributed to them, so you can always trace a claim back to what was
-actually said.
-
-Two structural layers: *inside* a gene (one topical field), a typed
-forest of beliefs with the three edges above; *across* genes, an
-entity index where a single entity referenced by N beliefs in M fields
-defines a hyperedge binding all N together — the R6 *entangle* rule.
-The graph shape is local to a gene; the hypergraph shape is global
-across them.
-
-When an agent is about to act, it doesn't reload the whole tree. It
-calls `expand(focus, budget)` and gets back a tight context pack —
-mass-weighted, dispute-aware, with a continuous freshness bonus so
-recent turns surface naturally without a dedicated "recent layer." The
-same retrieval function answers both *"what did we decide about auth?"*
-(mass dominates) and *"what am I in the middle of?"* (freshness
-dominates). The hypergraph doesn't fight the context window; it compresses
-into it, on demand, at query time.
-
-The consolidation story matters as much as the retrieval story. New
-beliefs enter raw, young, and source-grounded. An automatic
-consolidation pass runs after each ingest: near-duplicates collapse,
-fields rename themselves from their own content, the graph's shape
-quietly improves. The distinction between working memory and long-term
-memory isn't a layer — it's an emergent property of where a belief sits
-in the consolidation pipeline. Recent beliefs are raw because they
-haven't been processed yet; old beliefs are compressed because they
-have. Same model, different states.
-
-Thinking fast and slow isn't a trick. It's composition. An agent with
-working memory and no long-term memory is half-blind. An agent with
-long-term memory and no fidelity on recent turns is half-deaf. Bella is
-trying to give agents both — and to make the boundary between them
-soft enough that neither the agent nor the user has to reason about
-which layer a given fact came from. You just ask, and the right thing
-comes back.
-
----
-
-## Why it works: Jaynes × Shannon × Recursive Emergence
-
-Three ideas do the heavy lifting.
-
-**Jaynes.** A belief's mass is not a truth value; it's a sigmoid over
-accumulated log-odds. Every piece of evidence adds `log(lr)` to the
-accumulator, and the sigmoid keeps the result in `[0, 1]`. This is
-E.T. Jaynes's Bayesian update rule, which is the only coherent way to
-combine independent evidence without throwing information away. The
-voice-attenuation factor (same-voice evidence is attenuated 10×)
-enforces the "independent" part: an assistant repeating itself cannot
-fake ratification, because its log-odds contribution decays. That's
-what makes the `expand` pack rank-orderable by mass in a principled
-way instead of by arbitrary weights.
-
-**Shannon.** Entropy is literal, not metaphorical. The "mass limbo
-band" is a high-entropy region *by definition*: a belief at mass 0.52
-carries ≈1 bit of pure uncertainty because it has no evidence to
-distinguish true from false. When `prune` removes residue leaves, it
-isn't cleanup — it's a measurable drop in the Shannon entropy of the
-mass distribution (3.45 → 2.79 bits in the worked example below). The
-audit's other entropy signals (bandaid piles, root glut, garbage
-field names) are structural entropy measures too, in the same sense:
-each one quantifies specific forms of disorder the graph has failed
-to resolve.
-
-**Recursive Emergence.** The [RE thesis](https://github.com/Recursive-Emergence/RE/blob/main/thesis.md)
-proposes a unified principle: "every meaningful structure arises from
-interactions that reduce entropy while generating reusable patterns,"
-and those patterns accumulate into memory that biases future
-interactions toward more structure. The thesis's three symbols map
-onto Bella directly — **Ψ** (recursive memory state) is the belief
-graph, **Φ** (emergent coherence) is a ratified belief, **Ω**
-(contradiction-resolving lattice) is the ⊥ dispute structure. The
-memory update law `Ψ(t+1) = Ψ(t) + ∫ w(φ)·φ dφ` is the integral form
-of Jaynes's log-odds accumulation. The emergence potential
-`P = R · ΔH · S` (reusability × entropy reduction × structural
-compatibility) is what `expand(focus, budget)` computes when it ranks
-beliefs for retrieval. Bella isn't *inspired by* RE — it's a minimal
-working instance of RE for conversational coding memory.
-
-The work is the assembly: making these three ideas commit to specific
-decisions about what to store, what to merge, what to forget, and what
-to retrieve, so that an agent's next edit can actually use them.
 
 ---
 

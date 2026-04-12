@@ -496,11 +496,18 @@ is passed in as a callback from the CLI — not imported into core.
 
 ## Theory
 
-The "why" behind Jaynes log-odds, the Shannon-entropy framing of the
-audit signals, the Recursive Emergence mapping, and a worked
-flaky-test example with before/after diagrams all live in
-**[THEORY.md](https://github.com/immartian/bellamem/blob/master/THEORY.md)**. If you want to understand the design
-rather than just use the CLI, start there.
+The formal calculus — six rules, invariants, Bayesian grounding,
+domain-agnostic case studies — lives in **[`bella/`](bella/)**:
+
+- **[SPEC.md](bella/SPEC.md)** — the six rules, formal definitions
+- **[VISION.md](bella/VISION.md)** — theoretical grounding (Jaynes, Gödel, self-reference)
+- **[EXAMPLES.md](bella/EXAMPLES.md)** — case studies (H. pylori, continental drift, …)
+- **[MEMORY.md](bella/MEMORY.md)** — how BELLA maps to LLM agent memory
+
+**[THEORY.md](THEORY.md)** covers the implementation side: how
+bellamem maps the BELLA spec to Python — thresholds, data structures,
+a worked flaky-test example with before/after diagrams, and the
+decay equilibrium math.
 
 ---
 
