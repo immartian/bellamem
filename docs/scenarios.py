@@ -643,6 +643,288 @@ def _raw_transcript(dialogue: list[Turn]) -> str:
     return "\n".join(f"{t.voice}: {t.text}" for t in dialogue)
 
 
+# ---------------------------------------------------------------------------
+# Compression curve — the linear fit and the break-even metric
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class CompressionFit:
+    """Ordinary least-squares fit of expand_tokens against raw_tokens
+    across the scenario suite. The headline metric is `break_even_raw`
+    — the raw transcript size at which Bella stops costing tokens and
+    starts saving them. Below that threshold, the per-belief metadata
+    overhead dominates; above it, Bella saves a growing number of
+    tokens as dialogues grow.
+    """
+    intercept: float        # fixed overhead in tokens (per session)
+    slope: float            # marginal expand-tokens per raw-token
+    break_even_raw: float   # raw_tokens where raw == expand
+    n_points: int
+
+    def expand_for(self, raw_tokens: float) -> float:
+        return self.intercept + self.slope * raw_tokens
+
+
+def compression_fit(results: list[ScenarioResult]) -> CompressionFit:
+    """OLS linear regression of expand_tokens on raw_tokens.
+
+    With expand ≈ a + b·raw, the break-even point (raw == expand)
+    solves to raw = a / (1 − b), assuming b < 1 (i.e. Bella IS
+    compressing per-marginal-token).
+    """
+    if len(results) < 2:
+        raise ValueError("need at least two scenarios to fit a line")
+    n = len(results)
+    xs = [r.raw_tokens for r in results]
+    ys = [r.expand_tokens for r in results]
+    mean_x = sum(xs) / n
+    mean_y = sum(ys) / n
+    sxx = sum((x - mean_x) ** 2 for x in xs)
+    sxy = sum((x - mean_x) * (y - mean_y) for x, y in zip(xs, ys))
+    if sxx == 0:
+        raise ValueError("all raw_tokens identical — can't fit a slope")
+    slope = sxy / sxx
+    intercept = mean_y - slope * mean_x
+    if abs(1.0 - slope) < 1e-9:
+        break_even = float("inf")
+    else:
+        break_even = intercept / (1.0 - slope)
+    return CompressionFit(
+        intercept=intercept,
+        slope=slope,
+        break_even_raw=break_even,
+        n_points=n,
+    )
+
+
+# ---------------------------------------------------------------------------
+# SVG chart generation — hand-rolled, no external deps
+# ---------------------------------------------------------------------------
+
+
+def render_compression_chart_svg(results: list[ScenarioResult],
+                                  fit: CompressionFit) -> str:
+    """Return a self-contained SVG string visualizing the compression
+    curve. No external font dependencies (uses system-ui), no JS, no
+    embedded data URLs — renders cleanly through GitHub's Camo proxy.
+
+    Layout: 720×480 viewBox, plot area 600×400 with equal x/y unit
+    scaling so the y=x break-even line shows as a true 45° diagonal.
+    """
+    # World extent — pad past the data so labels have breathing room.
+    x_max = 1200
+    y_max = 800
+
+    # Plot area in screen coordinates.
+    px_left = 80
+    px_right = 680
+    py_top = 80
+    py_bottom = 410
+
+    plot_w = px_right - px_left   # 600
+    plot_h = py_bottom - py_top   # 330
+
+    def to_x(raw: float) -> float:
+        return px_left + (raw / x_max) * plot_w
+
+    def to_y(expand: float) -> float:
+        # SVG y grows downward; invert.
+        return py_bottom - (expand / y_max) * plot_h
+
+    # Per-scenario palette (matches the broader Bella brand: indigo,
+    # teal, amber, with a darker indigo for the largest one).
+    palette = {
+        "rejected-refactor": "#94a3b8",   # cool gray (smallest, baseline)
+        "flaky-test":        "#10b981",   # teal
+        "long-debug":        "#f59e0b",   # amber
+        "sprint":            "#6366f1",   # indigo (the headline result)
+    }
+
+    parts: list[str] = []
+    parts.append(
+        '<svg viewBox="0 0 720 480" width="720" height="480" '
+        'xmlns="http://www.w3.org/2000/svg" role="img" '
+        'aria-labelledby="title desc">'
+    )
+    parts.append(
+        '<title id="title">Bella compression curve</title>'
+    )
+    parts.append(
+        '<desc id="desc">A scatter plot of raw transcript tokens '
+        'against expand pack tokens for four synthetic scenarios. '
+        'The diagonal y=x line marks where Bella breaks even. '
+        'Points below the diagonal mean Bella saved tokens. The '
+        'linear fit predicts a break-even raw transcript size of '
+        f'about {fit.break_even_raw:.0f} tokens.</desc>'
+    )
+
+    # Background.
+    parts.append('<rect width="720" height="480" fill="#ffffff"/>')
+
+    # Title + subtitle (system-ui only — no Camo font issues).
+    parts.append(
+        '<text x="360" y="36" text-anchor="middle" '
+        'font-family="system-ui, -apple-system, sans-serif" '
+        'font-size="18" font-weight="700" fill="#1e1b4b">'
+        'Bella compression curve</text>'
+    )
+    parts.append(
+        '<text x="360" y="58" text-anchor="middle" '
+        'font-family="system-ui, -apple-system, sans-serif" '
+        'font-size="12" fill="#64748b">'
+        f'break-even: ~{fit.break_even_raw:.0f} raw tokens '
+        f'(expand ≈ {fit.intercept:.0f} + {fit.slope:.2f}·raw)'
+        '</text>'
+    )
+
+    # Axes.
+    parts.append(
+        f'<line x1="{px_left}" y1="{py_bottom}" '
+        f'x2="{px_right}" y2="{py_bottom}" '
+        f'stroke="#cbd5e1" stroke-width="1.5"/>'
+    )
+    parts.append(
+        f'<line x1="{px_left}" y1="{py_top}" '
+        f'x2="{px_left}" y2="{py_bottom}" '
+        f'stroke="#cbd5e1" stroke-width="1.5"/>'
+    )
+
+    # X axis ticks + labels.
+    for raw_tick in (0, 200, 400, 600, 800, 1000, 1200):
+        x = to_x(raw_tick)
+        parts.append(
+            f'<line x1="{x}" y1="{py_bottom}" x2="{x}" y2="{py_bottom + 5}" '
+            f'stroke="#94a3b8" stroke-width="1"/>'
+        )
+        parts.append(
+            f'<text x="{x}" y="{py_bottom + 20}" text-anchor="middle" '
+            f'font-family="system-ui, sans-serif" font-size="11" '
+            f'fill="#64748b">{raw_tick}</text>'
+        )
+    parts.append(
+        f'<text x="{(px_left + px_right) / 2}" y="{py_bottom + 42}" '
+        f'text-anchor="middle" font-family="system-ui, sans-serif" '
+        f'font-size="12" fill="#1e1b4b" font-weight="600">'
+        f'raw transcript tokens</text>'
+    )
+
+    # Y axis ticks + labels.
+    for expand_tick in (0, 200, 400, 600, 800):
+        y = to_y(expand_tick)
+        parts.append(
+            f'<line x1="{px_left - 5}" y1="{y}" x2="{px_left}" y2="{y}" '
+            f'stroke="#94a3b8" stroke-width="1"/>'
+        )
+        parts.append(
+            f'<text x="{px_left - 10}" y="{y + 4}" text-anchor="end" '
+            f'font-family="system-ui, sans-serif" font-size="11" '
+            f'fill="#64748b">{expand_tick}</text>'
+        )
+    parts.append(
+        f'<text x="{px_left - 50}" y="{(py_top + py_bottom) / 2}" '
+        f'text-anchor="middle" font-family="system-ui, sans-serif" '
+        f'font-size="12" fill="#1e1b4b" font-weight="600" '
+        f'transform="rotate(-90 {px_left - 50} {(py_top + py_bottom) / 2})">'
+        f'expand pack tokens</text>'
+    )
+
+    # The y=x break-even reference line — clipped to the plot area.
+    # raw=0 → expand=0; raw=x_max → expand=x_max (capped at y_max).
+    diag_end_raw = min(x_max, y_max)
+    parts.append(
+        f'<line x1="{to_x(0)}" y1="{to_y(0)}" '
+        f'x2="{to_x(diag_end_raw)}" y2="{to_y(diag_end_raw)}" '
+        f'stroke="#cbd5e1" stroke-width="1.5" stroke-dasharray="4,4"/>'
+    )
+    # Label the diagonal.
+    parts.append(
+        f'<text x="{to_x(700) + 6}" y="{to_y(700) - 6}" '
+        f'font-family="system-ui, sans-serif" font-size="11" '
+        f'fill="#94a3b8" font-style="italic">y = x  (break-even)</text>'
+    )
+
+    # The linear fit line — across the plot.
+    fit_y_left = fit.expand_for(0)
+    fit_y_right = fit.expand_for(x_max)
+    # Clip the fit endpoints to the plot frame.
+    parts.append(
+        f'<line x1="{to_x(0)}" y1="{to_y(fit_y_left)}" '
+        f'x2="{to_x(x_max)}" y2="{to_y(min(fit_y_right, y_max))}" '
+        f'stroke="#6366f1" stroke-width="2.0" opacity="0.7"/>'
+    )
+
+    # Vertical drop line at the break-even point.
+    bx = to_x(fit.break_even_raw)
+    parts.append(
+        f'<line x1="{bx}" y1="{py_top}" x2="{bx}" y2="{py_bottom}" '
+        f'stroke="#10b981" stroke-width="1.5" stroke-dasharray="3,3" '
+        f'opacity="0.8"/>'
+    )
+    parts.append(
+        f'<text x="{bx + 6}" y="{py_top + 16}" '
+        f'font-family="system-ui, sans-serif" font-size="11" '
+        f'fill="#10b981" font-weight="700">'
+        f'break-even ≈ {fit.break_even_raw:.0f} raw tokens</text>'
+    )
+
+    # Data points + scenario labels.
+    for r in results:
+        cx = to_x(r.raw_tokens)
+        cy = to_y(r.expand_tokens)
+        color = palette.get(r.name, "#1e1b4b")
+        parts.append(
+            f'<circle cx="{cx}" cy="{cy}" r="6.5" fill="{color}" '
+            f'stroke="white" stroke-width="2"/>'
+        )
+        # Place label to the right of the dot, except for the largest
+        # scenario (sprint) which would clip the right edge — put it
+        # to the upper-left instead.
+        if r.name == "sprint":
+            label_x = cx - 10
+            label_y = cy - 10
+            anchor = "end"
+        else:
+            label_x = cx + 12
+            label_y = cy + 4
+            anchor = "start"
+        parts.append(
+            f'<text x="{label_x}" y="{label_y}" text-anchor="{anchor}" '
+            f'font-family="system-ui, sans-serif" font-size="11" '
+            f'font-weight="600" fill="{color}">{r.name}</text>'
+        )
+        parts.append(
+            f'<text x="{label_x}" y="{label_y + 13}" text-anchor="{anchor}" '
+            f'font-family="ui-monospace, monospace" font-size="10" '
+            f'fill="#64748b">{r.compression_ratio:.1f}×</text>'
+        )
+
+    # Inline annotations near the diagonal — much less visual clutter
+    # than a legend block that lands on top of the data points.
+    parts.append(
+        f'<text x="{to_x(950)}" y="{to_y(420)}" text-anchor="end" '
+        f'font-family="system-ui, sans-serif" font-size="11" '
+        f'fill="#475569">below diagonal · Bella saves tokens</text>'
+    )
+    parts.append(
+        f'<text x="{to_x(250)}" y="{to_y(580)}" text-anchor="start" '
+        f'font-family="system-ui, sans-serif" font-size="11" '
+        f'fill="#94a3b8">above diagonal · Bella costs tokens</text>'
+    )
+
+    # Footer attribution.
+    parts.append(
+        '<text x="360" y="468" text-anchor="middle" '
+        'font-family="system-ui, sans-serif" font-size="10" '
+        'fill="#94a3b8">'
+        'github.com/immartian/bellamem · generated by docs/scenarios.py'
+        '</text>'
+    )
+
+    parts.append('</svg>')
+    return "\n".join(parts)
+
+
 def run_scenario(scenario: Scenario) -> ScenarioResult:
     set_embedder(HashEmbedder())
     bella = Bella()
@@ -737,13 +1019,35 @@ def _ingest_dialogue(bella: Bella, dialogue: list[Turn]) -> None:
 # ---------------------------------------------------------------------------
 
 
-def render_markdown(results: list[ScenarioResult]) -> str:
+def render_markdown(results: list[ScenarioResult],
+                    fit: CompressionFit | None = None) -> str:
+    if fit is None:
+        fit = compression_fit(results)
     lines = [
         "# Bella scenarios — entropy reduction, structural preservation, token compression",
         "",
         "Synthetic conversations that demonstrate Bella's compression story",
         "with reproducible numbers. Generated by `docs/scenarios.py`. Pinned by",
         "`tests/test_scenarios.py` so they can't silently drift.",
+        "",
+        "## Headline metric: where Bella starts paying off",
+        "",
+        f"**Break-even: ~{fit.break_even_raw:.0f} raw transcript tokens.**",
+        "",
+        f"Linear fit across {fit.n_points} scenarios: "
+        f"`expand_tokens ≈ {fit.intercept:.0f} + {fit.slope:.2f} × raw_tokens`.",
+        "",
+        "Below ~200 raw tokens, Bella's per-belief metadata overhead "
+        "dominates and the expand pack costs more tokens than the raw "
+        "transcript would. Above the break-even point, Bella saves "
+        "tokens, and the savings grow monotonically with dialogue size. "
+        "Use Bella for conversations longer than ~200 tokens; for "
+        "shorter chats, the flat tail is cheaper.",
+        "",
+        "![compression curve](compression-curve.svg)",
+        "",
+        "*(SVG generated alongside this report; embed and refresh "
+        "by running `python docs/scenarios.py`.)*",
         "",
         "Read each row as: a dialogue happens, Bella ingests it, time passes,",
         "decay + emerge + prune compress the graph, then a future agent asks",
@@ -833,7 +1137,9 @@ def render_markdown(results: list[ScenarioResult]) -> str:
 
 def main(out_path: Path | None = None) -> list[ScenarioResult]:
     out_path = out_path or Path(__file__).parent / "scenarios.md"
+    svg_path = out_path.parent / "compression-curve.svg"
     results = [run_scenario(s) for s in SCENARIOS]
+    fit = compression_fit(results)
 
     print("=" * 72)
     print(f"{'scenario':<22} {'raw':>6} {'beliefs':>10} "
@@ -845,9 +1151,17 @@ def main(out_path: Path | None = None) -> list[ScenarioResult]:
               f"{r.entropy_in:>5.2f} → {r.entropy_out:<5.2f} "
               f"{r.expand_tokens:>8} {r.compression_ratio:>6.1f}×")
     print()
+    print(f"linear fit: expand ≈ {fit.intercept:.0f} + "
+          f"{fit.slope:.3f} × raw")
+    print(f"break-even: ~{fit.break_even_raw:.0f} raw tokens "
+          f"(below this, Bella costs tokens; above it, Bella saves them)")
+    print()
 
-    out_path.write_text(render_markdown(results), encoding="utf-8")
+    out_path.write_text(render_markdown(results, fit), encoding="utf-8")
+    svg_path.write_text(render_compression_chart_svg(results, fit),
+                         encoding="utf-8")
     print(f"wrote {out_path}")
+    print(f"wrote {svg_path}")
     return results
 
 

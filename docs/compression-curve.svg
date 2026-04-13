@@ -1,0 +1,55 @@
+<svg viewBox="0 0 720 480" width="720" height="480" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+<title id="title">Bella compression curve</title>
+<desc id="desc">A scatter plot of raw transcript tokens against expand pack tokens for four synthetic scenarios. The diagonal y=x line marks where Bella breaks even. Points below the diagonal mean Bella saved tokens. The linear fit predicts a break-even raw transcript size of about 214 tokens.</desc>
+<rect width="720" height="480" fill="#ffffff"/>
+<text x="360" y="36" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="18" font-weight="700" fill="#1e1b4b">Bella compression curve</text>
+<text x="360" y="58" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="12" fill="#64748b">break-even: ~214 raw tokens (expand ≈ 106 + 0.51·raw)</text>
+<line x1="80" y1="410" x2="680" y2="410" stroke="#cbd5e1" stroke-width="1.5"/>
+<line x1="80" y1="80" x2="80" y2="410" stroke="#cbd5e1" stroke-width="1.5"/>
+<line x1="80.0" y1="410" x2="80.0" y2="415" stroke="#94a3b8" stroke-width="1"/>
+<text x="80.0" y="430" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#64748b">0</text>
+<line x1="180.0" y1="410" x2="180.0" y2="415" stroke="#94a3b8" stroke-width="1"/>
+<text x="180.0" y="430" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#64748b">200</text>
+<line x1="280.0" y1="410" x2="280.0" y2="415" stroke="#94a3b8" stroke-width="1"/>
+<text x="280.0" y="430" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#64748b">400</text>
+<line x1="380.0" y1="410" x2="380.0" y2="415" stroke="#94a3b8" stroke-width="1"/>
+<text x="380.0" y="430" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#64748b">600</text>
+<line x1="480.0" y1="410" x2="480.0" y2="415" stroke="#94a3b8" stroke-width="1"/>
+<text x="480.0" y="430" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#64748b">800</text>
+<line x1="580.0" y1="410" x2="580.0" y2="415" stroke="#94a3b8" stroke-width="1"/>
+<text x="580.0" y="430" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#64748b">1000</text>
+<line x1="680.0" y1="410" x2="680.0" y2="415" stroke="#94a3b8" stroke-width="1"/>
+<text x="680.0" y="430" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#64748b">1200</text>
+<text x="380.0" y="452" text-anchor="middle" font-family="system-ui, sans-serif" font-size="12" fill="#1e1b4b" font-weight="600">raw transcript tokens</text>
+<line x1="75" y1="410.0" x2="80" y2="410.0" stroke="#94a3b8" stroke-width="1"/>
+<text x="70" y="414.0" text-anchor="end" font-family="system-ui, sans-serif" font-size="11" fill="#64748b">0</text>
+<line x1="75" y1="327.5" x2="80" y2="327.5" stroke="#94a3b8" stroke-width="1"/>
+<text x="70" y="331.5" text-anchor="end" font-family="system-ui, sans-serif" font-size="11" fill="#64748b">200</text>
+<line x1="75" y1="245.0" x2="80" y2="245.0" stroke="#94a3b8" stroke-width="1"/>
+<text x="70" y="249.0" text-anchor="end" font-family="system-ui, sans-serif" font-size="11" fill="#64748b">400</text>
+<line x1="75" y1="162.5" x2="80" y2="162.5" stroke="#94a3b8" stroke-width="1"/>
+<text x="70" y="166.5" text-anchor="end" font-family="system-ui, sans-serif" font-size="11" fill="#64748b">600</text>
+<line x1="75" y1="80.0" x2="80" y2="80.0" stroke="#94a3b8" stroke-width="1"/>
+<text x="70" y="84.0" text-anchor="end" font-family="system-ui, sans-serif" font-size="11" fill="#64748b">800</text>
+<text x="30" y="245.0" text-anchor="middle" font-family="system-ui, sans-serif" font-size="12" fill="#1e1b4b" font-weight="600" transform="rotate(-90 30 245.0)">expand pack tokens</text>
+<line x1="80.0" y1="410.0" x2="480.0" y2="80.0" stroke="#cbd5e1" stroke-width="1.5" stroke-dasharray="4,4"/>
+<text x="436.0" y="115.25" font-family="system-ui, sans-serif" font-size="11" fill="#94a3b8" font-style="italic">y = x  (break-even)</text>
+<line x1="80.0" y1="366.2653909803019" x2="680.0" y2="116.2306186855555" stroke="#6366f1" stroke-width="2.0" opacity="0.7"/>
+<line x1="187.12036829730053" y1="80" x2="187.12036829730053" y2="410" stroke="#10b981" stroke-width="1.5" stroke-dasharray="3,3" opacity="0.8"/>
+<text x="193.12036829730053" y="96" font-family="system-ui, sans-serif" font-size="11" fill="#10b981" font-weight="700">break-even ≈ 214 raw tokens</text>
+<circle cx="172.0" cy="313.8875" r="6.5" fill="#10b981" stroke="white" stroke-width="2"/>
+<text x="184.0" y="317.8875" text-anchor="start" font-family="system-ui, sans-serif" font-size="11" font-weight="600" fill="#10b981">flaky-test</text>
+<text x="184.0" y="330.8875" text-anchor="start" font-family="ui-monospace, monospace" font-size="10" fill="#64748b">0.8×</text>
+<circle cx="120.0" cy="359.675" r="6.5" fill="#94a3b8" stroke="white" stroke-width="2"/>
+<text x="132.0" y="363.675" text-anchor="start" font-family="system-ui, sans-serif" font-size="11" font-weight="600" fill="#94a3b8">rejected-refactor</text>
+<text x="132.0" y="376.675" text-anchor="start" font-family="ui-monospace, monospace" font-size="10" fill="#64748b">0.7×</text>
+<circle cx="334.0" cy="264.8" r="6.5" fill="#f59e0b" stroke="white" stroke-width="2"/>
+<text x="346.0" y="268.8" text-anchor="start" font-family="system-ui, sans-serif" font-size="11" font-weight="600" fill="#f59e0b">long-debug</text>
+<text x="346.0" y="281.8" text-anchor="start" font-family="ui-monospace, monospace" font-size="10" fill="#64748b">1.4×</text>
+<circle cx="612.5" cy="143.9375" r="6.5" fill="#6366f1" stroke="white" stroke-width="2"/>
+<text x="602.5" y="133.9375" text-anchor="end" font-family="system-ui, sans-serif" font-size="11" font-weight="600" fill="#6366f1">sprint</text>
+<text x="602.5" y="146.9375" text-anchor="end" font-family="ui-monospace, monospace" font-size="10" fill="#64748b">1.7×</text>
+<text x="555.0" y="236.75" text-anchor="end" font-family="system-ui, sans-serif" font-size="11" fill="#475569">below diagonal · Bella saves tokens</text>
+<text x="205.0" y="170.75" text-anchor="start" font-family="system-ui, sans-serif" font-size="11" fill="#94a3b8">above diagonal · Bella costs tokens</text>
+<text x="360" y="468" text-anchor="middle" font-family="system-ui, sans-serif" font-size="10" fill="#94a3b8">github.com/immartian/bellamem · generated by docs/scenarios.py</text>
+</svg>

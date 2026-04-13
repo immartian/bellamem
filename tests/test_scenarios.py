@@ -99,6 +99,41 @@ def test_long_debug_actually_compresses_tokens(results):
     )
 
 
+def test_compression_curve_break_even_under_300_tokens(results):
+    """The headline metric: a linear fit of expand_tokens against
+    raw_tokens predicts a break-even point — the raw transcript size
+    above which Bella starts saving tokens. This pins it at <300
+    raw tokens, matching the documented "use Bella for conversations
+    longer than ~200 tokens" guidance.
+
+    If a future change to expand, ingest, or prune drives the
+    break-even point above 300, the rule of thumb is wrong and
+    docs/scenarios.md (and the README pitch) need to be updated.
+    """
+    from scenarios import compression_fit  # type: ignore[import-not-found]
+    fit = compression_fit(results)
+    assert fit.intercept > 0, (
+        f"linear fit must have positive intercept (fixed overhead "
+        f"per session); got {fit.intercept:.2f}"
+    )
+    assert 0 < fit.slope < 1, (
+        f"linear fit slope must be between 0 and 1 — Bella IS "
+        f"compressing each marginal raw token; got {fit.slope:.3f}"
+    )
+    assert fit.break_even_raw < 300, (
+        f"break-even point drifted above 300 raw tokens "
+        f"({fit.break_even_raw:.0f}); the 'use Bella for "
+        f"conversations >~200 tokens' rule of thumb no longer holds. "
+        f"Either fix the regression or update docs/scenarios.md and "
+        f"the README pitch."
+    )
+    assert fit.break_even_raw > 100, (
+        f"break-even point dropped suspiciously low "
+        f"({fit.break_even_raw:.0f}) — verify the linear fit isn't "
+        f"degenerate"
+    )
+
+
 def test_compression_ratio_grows_with_scale(results):
     """The empirical tendency: as raw transcript size grows, the
     compression ratio improves because Bella's per-belief metadata
