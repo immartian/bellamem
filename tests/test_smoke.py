@@ -234,6 +234,41 @@ def test_regex_ew_reaction_classifier():
     assert classify_reaction("what about the database layer?") == "neutral"
 
 
+def test_regex_ew_skips_quoted_graph_output():
+    """When the assistant (or the user) quotes bellamem's own graph
+    output — m=0.XX v=N mass/voice lines, score=X.XX Δ= surprise
+    lines — those sentences must NOT be extracted as new claims.
+    Prevents the "assistant quotes audit → gets re-extracted → appears
+    in next audit" feedback loop the graph ratified as a known rot.
+    """
+    from bellamem.adapters.chat import extract_claims
+
+    # Assistant voice quoting audit's top-ratified-decisions output.
+    quoted_audit = (
+        "Looking at the top ratified decisions: "
+        "m=0.74 v=2  [user_invariants_memory]  I doubt anyone has wired "
+        "this into CI yet per the README audit contract."
+    )
+    assert extract_claims(quoted_audit, voice="assistant") == []
+
+    # User voice pasting a surprises line back into conversation.
+    quoted_surprise = (
+        "score=0.92  Δ=+0.92  0.50→0.71  [user_invariants_memo] "
+        "the classifier ratifies every sentence."
+    )
+    assert extract_claims(quoted_surprise, voice="user") == []
+
+    # Control: the same sentence WITHOUT the graph fingerprint should
+    # still be extractable (proves the filter is targeted, not broad).
+    control = (
+        "The classifier ratifies every sentence from the preceding "
+        "assistant turn when the user says yes."
+    )
+    # Control must produce at least one claim — demonstrating the
+    # filter didn't over-reject.
+    assert len(extract_claims(control, voice="user")) >= 1
+
+
 # ---------------------------------------------------------------------------
 # Adapters — system noise filter
 # ---------------------------------------------------------------------------

@@ -194,6 +194,25 @@ _DEMONSTRATIVE_RE = re.compile(
     re.I,
 )
 
+# Bellamem's own graph output fingerprints — if a sentence contains one
+# of these patterns, it's a direct quote of audit/expand/surprise output,
+# not a new claim. Filtering here prevents the graph from re-ingesting
+# its own inspection reports as fresh beliefs (the "assistant quotes
+# audit → gets re-extracted → appears in next audit" loop the graph
+# has already ratified as a known rot pattern).
+#
+# The two signatures are unambiguous — neither appears in normal English
+# or code:
+#   m=0.XX v=N   →  bellamem's belief mass/voice format
+#   score=X.XX Δ=  →  bellamem surprises output
+#
+# Same class as _ASSISTANT_PREAMBLE_RE and _DEMONSTRATIVE_RE: a
+# structural pattern filter, not a hand-maintained stoplist.
+_GRAPH_OUTPUT_RE = re.compile(
+    r"m=\d\.\d{1,3}\s*v=\d|"     # bellamem mass/voice format
+    r"score=\d\.\d{1,3}\s*Δ=",    # bellamem surprises format
+)
+
 # Markdown-heavy lines that are mostly formatting, not content
 _CODE_DENSITY_RE = re.compile(r"`[^`]{1,60}`")
 
@@ -218,6 +237,8 @@ def _classify_user(sent: str) -> tuple[str, float] | None:
     s = sent.strip()
     if len(s) < 6 or len(s) > 300:
         return None
+    if _GRAPH_OUTPUT_RE.search(s):
+        return None  # quoted graph output, not a new claim (see regex comment)
     if _QUESTION_RE.search(s):
         return None
     if _FILLER_RE.match(s):
@@ -257,6 +278,8 @@ def _classify_assistant(sent: str) -> tuple[str, float] | None:
     n_words = len(words)
     if n_words < 8 or n_words > 28 or len(s) > 240:
         return None
+    if _GRAPH_OUTPUT_RE.search(s):
+        return None  # quoted graph output, not a new claim (see regex comment)
     if _QUESTION_RE.search(s):
         return None
     if _FILLER_RE.match(s):
