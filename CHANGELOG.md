@@ -4,6 +4,82 @@ All notable changes will be documented in this file. This project aims
 for [Semantic Versioning](https://semver.org). Until v1.0, everything
 is subject to change.
 
+## [0.1.1] — 2026-04-13 — Windows fix, AGPL transition, theory split
+
+First patch release. Ships the fix for the first community-reported
+bug (Windows `UnicodeDecodeError` on `bellamem save`), the license
+transition from MIT to AGPL-3.0-or-later, and the split between the
+formal BELLA theory and the bellamem implementation.
+
+### Fixed
+
+- **Windows `UnicodeDecodeError` on `.jsonl` ingest** (#3, reported
+  by @Salgado-Andres). `adapters/claude_code.py:iter_turns` opened
+  `.jsonl` transcripts without an explicit `encoding`, so on Windows
+  Python's default code page (`cp1252`) couldn't decode UTF-8 bytes
+  like `0x90`. Auditing for the same pattern surfaced **11 more**
+  text-mode `open()` calls with the same latent bug — every read/write
+  of user content in `adapters/llm_ew.py`, `core/store.py`,
+  `core/embed.py`, `cli.py` DOT output, and `bench.py`. All 12 sites
+  now open with explicit `encoding="utf-8"`. The two `.jsonl` readers
+  additionally use `errors="replace"` so undecodable prose bytes
+  become `?` rather than crashing the ingest — JSON structural
+  characters are always ASCII-safe so parsing continues. The other
+  10 sites are strict: bellamem owns those files and corruption
+  should fail loud.
+
+### Changed
+
+- **License: MIT → AGPL-3.0-or-later.** Community use stays free;
+  cloud vendors who modify Bella and serve it over a network must
+  open-source their modifications. Updated `LICENSE`, `pyproject.toml`
+  (license field + classifier), and README.
+- **`bella/` — formal theory lives alongside the implementation.**
+  The domain-agnostic BELLA calculus (SPEC, VISION, EXAMPLES, MEMORY)
+  is now a sibling to the `bellamem/` Python package. `THEORY.md`
+  restructured to cover only implementation choices (thresholds, data
+  structures, worked example, decay math); formal definitions live in
+  `bella/SPEC.md`. This positions bellamem as one application of the
+  BELLA calculus — the abstract `Bella` base class is deferred until
+  a second application forces the interface to be discovered.
+- **Canonical-workspace policy.** `bellamem save` and the slash-command
+  session discovery now use `project_root()` (the git repo root) by
+  default instead of raw `cwd`. One project, one memory, regardless of
+  which subfolder you launched Claude Code from. A stderr caveat fires
+  when `cwd ≠ project_root` so the behavior is visible.
+- **`.env` loads from `project_root()`**, not cwd. One project, one
+  config, regardless of subfolder.
+- **README tightening.** Pain section compressed from 37 → 24 lines
+  using the "intern with amnesia" framing from the content arsenal.
+  Architecture file tree replaced with a 6-line summary + link to
+  `ARCHITECTURE.md`. Added the "RAG retrieves documents. Agents need
+  to retrieve beliefs." positioning line. Net: README shrunk 534 → 495
+  lines.
+- **Finish `BellaMem → Bella` rebrand** across slash-command template,
+  source comments, and the three tests that still asserted against the
+  old name (`test_visualize.py`, `test_composites.py`,
+  `test_example_session.py`).
+
+### Housekeeping
+
+- `.claude/` fully gitignored and removed from history via
+  `git filter-repo`. The `bellamem-guard` hook config is no longer
+  tracked; new clones can write their own `settings.json` locally.
+- `.codex/` gitignored for Codex agent state.
+- Full test suite now 109/109 green for the first time since the
+  rebrand.
+
+### Not in this release
+
+- Three.js 3D viz (deferred to v0.1.2+)
+- `bellamem ask` unified retrieval, autonomic lifecycle timer
+  (tracked in #2 — command surface reduction)
+- Graph-backed `/compact`, native edit-guard primitive, belief-
+  addressable context window (tracked in #1 — blocked on upstream
+  Claude Code hooks)
+
+---
+
 ## [0.1.0] — 2026-04-11 — log-odds decay and the steady state
 
 First version where beliefs fade when nobody talks about them anymore.
