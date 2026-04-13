@@ -394,11 +394,14 @@ Visually:
   <img src="docs/compression-curve-production.svg" alt="Production compression curve: 15 anonymised Claude Code sessions plotted on log-x axis from 100 to 200,000 raw conversation tokens. Each point's expand pack token count clusters near a budget ceiling of 1,500 regardless of how large the raw transcript got — so the compression ratio diverges with raw size. Synthetic small-scale scenarios appear as gray dots in the lower-left for context." width="720"/>
 </p>
 
-The pattern is unambiguous: **at production scale, the expand pack
-saturates at the budget ceiling, but the raw transcript is unbounded**.
-Doubling raw doesn't double expand; it doubles the ratio. The biggest
-sample (a multi-day news monorepo session at 132k conversation tokens)
-hit 90×.
+The pattern is unambiguous: **`expand` honors whatever budget the
+caller passes, regardless of how big the raw transcript got**. The
+horizontal line in the chart is the budget *I* picked for these
+measurements (1500) — at budget=3000 every ratio would halve, at
+budget=500 every ratio would triple. The actual claim is that the
+ratio diverges with raw size at any budget you choose. Doubling raw
+doesn't double expand; it doubles the ratio. The biggest sample (a
+multi-day news monorepo session at 132k conversation tokens) hit 90×.
 
 A second chart in the same doc shows the smaller-scale linear regime
 where `expand` grows with raw — that's where the synthetic break-even

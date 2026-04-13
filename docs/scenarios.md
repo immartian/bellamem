@@ -17,14 +17,18 @@ Bella has two compression regimes that no single chart can cover:
    **~214 raw tokens**. Below that, Bella costs
    tokens; above, it saves them.
 
-2. **Production regime** (raw > ~2000 tokens) — `expand` saturates
-   at the budget ceiling, so the pack size becomes essentially
-   constant regardless of how long the raw transcript is. The
-   compression ratio **diverges with raw size** instead of growing
-   linearly. Across 15 real sessions sampled from 15
-   different Claude Code projects on a developer's machine, ratios
-   range from **4× to 90×** with median
-   **18×**.
+2. **Production regime** (raw > ~2000 tokens) — `expand` honors
+   whatever budget the caller passes, so the pack size stays close
+   to that budget regardless of how long the raw transcript is.
+   The compression ratio **diverges with raw size** instead of
+   growing linearly. Across 15 real sessions sampled from
+   15 different Claude Code projects on a developer's
+   machine, ratios range from **4× to 90×**
+   with median **18×**, all measured at one fixed
+   budget choice. (At budget 3000 every ratio would halve; at
+   budget 500 every ratio would triple. The divergent-with-raw
+   pattern is the actual claim — the specific budget is just the
+   measurement protocol.)
 
 ### Chart 1 — small-scale, linear fit, break-even point
 

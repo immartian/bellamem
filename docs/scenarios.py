@@ -1112,7 +1112,14 @@ def render_production_chart_svg(
         f'expand pack tokens</text>'
     )
 
-    # Budget ceiling line
+    # The expand budget I chose for these measurements. NOT an
+    # intrinsic Bella limit — it's the `budget_tokens` parameter I
+    # passed to expand(). At budget=3000 every point would cluster
+    # higher; at budget=500 every point would cluster lower. The
+    # interesting fact is that expand() RESPECTS this budget while
+    # still surfacing the load-bearing claims, regardless of how
+    # big the raw transcript got. The divergence-with-raw-size
+    # story holds at any budget.
     by = to_y(budget)
     parts.append(
         f'<line x1="{px_left}" y1="{by}" x2="{px_right}" y2="{by}" '
@@ -1123,7 +1130,7 @@ def render_production_chart_svg(
         f'<text x="{px_right - 8}" y="{by - 6}" text-anchor="end" '
         f'font-family="system-ui, sans-serif" font-size="11" '
         f'fill="#10b981" font-weight="700">'
-        f'budget ceiling ({budget})</text>'
+        f'budget I chose ({budget}) — pick any value, the divergence stays</text>'
     )
 
     # Synthetic scenarios as small gray markers in the background.
@@ -1170,13 +1177,13 @@ def render_production_chart_svg(
             f'stroke="white" stroke-width="2"/>'
         )
 
-    # Annotation: where Bella starts paying off
+    # Annotation: the actual claim being made
     parts.append(
         f'<text x="{to_x(300)}" y="{to_y(50)}" text-anchor="start" '
         f'font-family="system-ui, sans-serif" font-size="11" '
         f'fill="#475569">'
-        f'every production point sits well below the budget ceiling — '
-        f'expand is bounded, raw is not</text>'
+        f'expand respects whatever budget the caller picks — '
+        f'the ratio diverges with raw size at any budget</text>'
     )
 
     # Footer
@@ -1323,14 +1330,18 @@ def render_markdown(results: list[ScenarioResult],
         f"   **~{fit.break_even_raw:.0f} raw tokens**. Below that, Bella costs",
         f"   tokens; above, it saves them.",
         "",
-        f"2. **Production regime** (raw > ~2000 tokens) — `expand` saturates",
-        f"   at the budget ceiling, so the pack size becomes essentially",
-        f"   constant regardless of how long the raw transcript is. The",
-        f"   compression ratio **diverges with raw size** instead of growing",
-        f"   linearly. Across {prod_n} real sessions sampled from {prod_n}",
-        f"   different Claude Code projects on a developer's machine, ratios",
-        f"   range from **{prod_min:.0f}× to {prod_max:.0f}×** with median",
-        f"   **{prod_median:.0f}×**.",
+        f"2. **Production regime** (raw > ~2000 tokens) — `expand` honors",
+        f"   whatever budget the caller passes, so the pack size stays close",
+        f"   to that budget regardless of how long the raw transcript is.",
+        f"   The compression ratio **diverges with raw size** instead of",
+        f"   growing linearly. Across {prod_n} real sessions sampled from",
+        f"   {prod_n} different Claude Code projects on a developer's",
+        f"   machine, ratios range from **{prod_min:.0f}× to {prod_max:.0f}×**",
+        f"   with median **{prod_median:.0f}×**, all measured at one fixed",
+        f"   budget choice. (At budget 3000 every ratio would halve; at",
+        f"   budget 500 every ratio would triple. The divergent-with-raw",
+        f"   pattern is the actual claim — the specific budget is just the",
+        f"   measurement protocol.)",
         "",
         "### Chart 1 — small-scale, linear fit, break-even point",
         "",
