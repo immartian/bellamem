@@ -964,27 +964,30 @@ def render_compression_chart_svg(results: list[ScenarioResult],
     return "\n".join(parts)
 
 
-def render_production_chart_svg(
+def render_ratio_chart_svg(
     measurements: list[tuple[int, int, int]],
-    budget: int,
     synthetic_results: list[ScenarioResult] | None = None,
 ) -> str:
-    """Production-scale compression chart.
+    """Compression-ratio chart across both synthetic and production
+    scenarios, on log-x raw_tokens × log-y compression_ratio.
 
-    Log-x axis (raw_tokens from 100 to 200_000), linear-y axis
-    (expand_tokens 0 to 2000). Each measurement is a colored dot;
-    a horizontal line marks the budget ceiling at y=budget. The
-    synthetic scenarios overlay as small gray markers for context,
-    if provided.
+    This replaces the older token-axis production chart because the
+    headline claim is "the compression ratio diverges with raw size"
+    — a ratio chart plots that claim directly instead of asking the
+    reader to mentally divide y by x. The y=1 dashed line is the
+    break-even reference (anything above it = Bella saves tokens).
+    Both regimes (synthetic small-scale and production large-scale)
+    fit on the same chart because log-y handles the 100× dynamic
+    range gracefully.
 
-    Tells the story: at production scale, expand stays bounded by
-    the budget regardless of how big the raw transcript got. The
-    compression ratio diverges with raw size.
+    Self-contained SVG, system-ui font (no Camo proxy issues),
+    720×480 viewBox.
     """
     import math
 
-    x_min, x_max = 100, 200_000  # log-x bounds
-    y_max = 2000
+    # Axis bounds — wide enough for both regimes
+    x_min, x_max = 50, 200_000          # log-x: raw tokens
+    y_min, y_max = 0.5, 100              # log-y: ratio
 
     px_left = 80
     px_right = 680
@@ -994,36 +997,57 @@ def render_production_chart_svg(
     plot_w = px_right - px_left
     plot_h = py_bottom - py_top
 
-    log_min = math.log10(x_min)
-    log_max = math.log10(x_max)
-    log_span = log_max - log_min
+    log_x_min = math.log10(x_min)
+    log_x_max = math.log10(x_max)
+    log_x_span = log_x_max - log_x_min
+
+    log_y_min = math.log10(y_min)
+    log_y_max = math.log10(y_max)
+    log_y_span = log_y_max - log_y_min
 
     def to_x(raw: float) -> float:
-        # Clamp to axis bounds defensively.
         r = max(x_min, min(x_max, raw))
-        return px_left + ((math.log10(r) - log_min) / log_span) * plot_w
+        return px_left + ((math.log10(r) - log_x_min) / log_x_span) * plot_w
 
-    def to_y(expand: float) -> float:
-        return py_bottom - (expand / y_max) * plot_h
+    def to_y(ratio: float) -> float:
+        r = max(y_min, min(y_max, ratio))
+        return py_bottom - ((math.log10(r) - log_y_min) / log_y_span) * plot_h
+
+    # Combined data: synthetic and production points, each tagged
+    combined: list[tuple[float, float, str]] = []  # (raw, ratio, source)
+    if synthetic_results:
+        for r in synthetic_results:
+            if r.expand_tokens > 0:
+                combined.append((r.raw_tokens,
+                                 r.raw_tokens / r.expand_tokens,
+                                 "synthetic"))
+    for raw, _beliefs, pack in measurements:
+        if pack > 0:
+            combined.append((raw, raw / pack, "production"))
+
+    n_synthetic = sum(1 for *_, s in combined if s == "synthetic")
+    n_production = sum(1 for *_, s in combined if s == "production")
+    n_total = len(combined)
 
     parts: list[str] = []
     parts.append(
         '<svg viewBox="0 0 720 480" width="720" height="480" '
         'xmlns="http://www.w3.org/2000/svg" role="img" '
-        'aria-labelledby="ptitle pdesc">'
+        'aria-labelledby="rtitle rdesc">'
     )
     parts.append(
-        '<title id="ptitle">Bella compression at production scale</title>'
+        '<title id="rtitle">Bella compression ratio across all scenarios</title>'
     )
-    n = len(measurements)
     parts.append(
-        f'<desc id="pdesc">{n} real Claude Code sessions sampled '
-        f'across {n} different projects. Log-x raw conversation tokens '
-        f'against linear-y expand pack tokens at budget {budget}. '
-        f'A horizontal line marks the budget ceiling. As raw tokens '
-        f'grow by orders of magnitude, the expand pack saturates at '
-        f'the budget — so the compression ratio diverges with raw '
-        f'size. Median ratio across the sample is around 17×.</desc>'
+        f'<desc id="rdesc">A scatter plot of {n_total} scenarios — '
+        f'{n_synthetic} synthetic and {n_production} real Claude Code '
+        f'sessions sampled from {n_production} different projects. '
+        f'X axis: raw conversation tokens, log scale, 50 to 200,000. '
+        f'Y axis: compression ratio (raw / expand pack tokens), log '
+        f'scale, 0.5 to 100. A horizontal dashed line at ratio = 1 '
+        f'marks break-even (above means Bella saved tokens). The '
+        f'curve climbs monotonically with raw transcript size, from '
+        f'below 1 at toy scale to 90 at production scale.</desc>'
     )
 
     parts.append('<rect width="720" height="480" fill="#ffffff"/>')
@@ -1032,19 +1056,18 @@ def render_production_chart_svg(
         '<text x="360" y="36" text-anchor="middle" '
         'font-family="system-ui, -apple-system, sans-serif" '
         'font-size="18" font-weight="700" fill="#1e1b4b">'
-        'Bella compression at production scale</text>'
+        'Bella compression ratio across all scenarios</text>'
     )
 
-    # Compute ratio range for the subtitle
-    ratios = [raw / pack for raw, _b, pack in measurements if pack > 0]
-    median_ratio = sorted(ratios)[len(ratios) // 2] if ratios else 0
+    prod_ratios = sorted(r for _, r, s in combined if s == "production")
+    median_p = prod_ratios[len(prod_ratios) // 2] if prod_ratios else 0
     parts.append(
         '<text x="360" y="58" text-anchor="middle" '
         'font-family="system-ui, -apple-system, sans-serif" '
         'font-size="12" fill="#64748b">'
-        f'{n} real sessions across {n} projects · '
-        f'ratio range {min(ratios):.0f}×—{max(ratios):.0f}× · '
-        f'median {median_ratio:.0f}×'
+        f'{n_synthetic} synthetic + {n_production} real sessions · '
+        f'production median {median_p:.0f}× · '
+        f'ratio grows monotonically with raw size'
         '</text>'
     )
 
@@ -1060,7 +1083,7 @@ def render_production_chart_svg(
         f'stroke="#cbd5e1" stroke-width="1.5"/>'
     )
 
-    # X axis: log ticks at 100, 1k, 10k, 100k
+    # X axis log ticks
     for tick, label in [(100, "100"), (1000, "1k"), (10000, "10k"),
                          (100000, "100k")]:
         x = to_x(tick)
@@ -1073,12 +1096,10 @@ def render_production_chart_svg(
             f'font-family="system-ui, sans-serif" font-size="11" '
             f'fill="#64748b">{label}</text>'
         )
-        # Faint vertical grid line
         parts.append(
             f'<line x1="{x}" y1="{py_top}" x2="{x}" y2="{py_bottom}" '
             f'stroke="#f1f5f9" stroke-width="1"/>'
         )
-    # Minor ticks at intermediate values for log feel
     for tick in (200, 500, 2000, 5000, 20000, 50000):
         x = to_x(tick)
         parts.append(
@@ -1092,8 +1113,10 @@ def render_production_chart_svg(
         f'raw conversation tokens (log scale)</text>'
     )
 
-    # Y axis: linear ticks at 0, 500, 1000, 1500, 2000
-    for tick in (0, 500, 1000, 1500, 2000):
+    # Y axis log ticks: 0.5, 1, 2, 5, 10, 20, 50, 100
+    y_ticks = [(0.5, "0.5×"), (1, "1×"), (2, "2×"), (5, "5×"),
+               (10, "10×"), (20, "20×"), (50, "50×"), (100, "100×")]
+    for tick, label in y_ticks:
         y = to_y(tick)
         parts.append(
             f'<line x1="{px_left - 5}" y1="{y}" x2="{px_left}" y2="{y}" '
@@ -1102,88 +1125,84 @@ def render_production_chart_svg(
         parts.append(
             f'<text x="{px_left - 10}" y="{y + 4}" text-anchor="end" '
             f'font-family="system-ui, sans-serif" font-size="11" '
-            f'fill="#64748b">{tick}</text>'
+            f'fill="#64748b">{label}</text>'
+        )
+        # Faint horizontal grid line
+        parts.append(
+            f'<line x1="{px_left}" y1="{y}" x2="{px_right}" y2="{y}" '
+            f'stroke="#f8fafc" stroke-width="1"/>'
         )
     parts.append(
-        f'<text x="{px_left - 50}" y="{(py_top + py_bottom) / 2}" '
+        f'<text x="{px_left - 55}" y="{(py_top + py_bottom) / 2}" '
         f'text-anchor="middle" font-family="system-ui, sans-serif" '
         f'font-size="12" fill="#1e1b4b" font-weight="600" '
-        f'transform="rotate(-90 {px_left - 50} {(py_top + py_bottom) / 2})">'
-        f'expand pack tokens</text>'
+        f'transform="rotate(-90 {px_left - 55} {(py_top + py_bottom) / 2})">'
+        f'compression ratio (log scale)</text>'
     )
 
-    # The expand budget I chose for these measurements. NOT an
-    # intrinsic Bella limit — it's the `budget_tokens` parameter I
-    # passed to expand(). At budget=3000 every point would cluster
-    # higher; at budget=500 every point would cluster lower. The
-    # interesting fact is that expand() RESPECTS this budget while
-    # still surfacing the load-bearing claims, regardless of how
-    # big the raw transcript got. The divergence-with-raw-size
-    # story holds at any budget.
-    by = to_y(budget)
+    # ratio = 1 break-even reference line, dashed
+    by = to_y(1)
     parts.append(
         f'<line x1="{px_left}" y1="{by}" x2="{px_right}" y2="{by}" '
-        f'stroke="#10b981" stroke-width="1.5" stroke-dasharray="6,4" '
+        f'stroke="#475569" stroke-width="1.5" stroke-dasharray="5,4" '
         f'opacity="0.7"/>'
     )
     parts.append(
         f'<text x="{px_right - 8}" y="{by - 6}" text-anchor="end" '
         f'font-family="system-ui, sans-serif" font-size="11" '
-        f'fill="#10b981" font-weight="700">'
-        f'budget I chose ({budget}) — pick any value, the divergence stays</text>'
+        f'fill="#475569" font-weight="700">'
+        f'ratio = 1× (break-even)</text>'
+    )
+    parts.append(
+        f'<text x="{px_right - 8}" y="{by + 16}" text-anchor="end" '
+        f'font-family="system-ui, sans-serif" font-size="10" '
+        f'fill="#94a3b8">'
+        f'above this line, Bella saves tokens</text>'
     )
 
-    # Synthetic scenarios as small gray markers in the background.
-    if synthetic_results:
-        for r in synthetic_results:
-            if r.raw_tokens < x_min:
-                continue
-            cx = to_x(r.raw_tokens)
-            cy = to_y(r.expand_tokens)
-            parts.append(
-                f'<circle cx="{cx}" cy="{cy}" r="3.5" '
-                f'fill="#cbd5e1" stroke="#94a3b8" stroke-width="1"/>'
-            )
-        # Caption for the synthetic markers
-        parts.append(
-            f'<text x="{to_x(150)}" y="{to_y(280)}" text-anchor="start" '
-            f'font-family="system-ui, sans-serif" font-size="10" '
-            f'fill="#94a3b8" font-style="italic">'
-            f'gray dots: synthetic scenarios</text>'
-        )
-
-    # Production data points — colored by ratio (compressed gradient).
+    # Color gradient: low ratio → indigo, high ratio → green
     def color_for_ratio(r: float) -> str:
-        # Cool gray (low ratio) → indigo → green (high ratio).
-        if r < 5:
-            return "#94a3b8"
+        if r < 1:
+            return "#94a3b8"      # gray (Bella costs tokens)
+        if r < 3:
+            return "#a5b4fc"      # light indigo
         if r < 10:
-            return "#6366f1"
+            return "#6366f1"      # indigo
         if r < 25:
-            return "#4f46e5"
+            return "#4f46e5"      # darker indigo
         if r < 50:
-            return "#10b981"
-        return "#059669"
+            return "#10b981"      # teal
+        return "#059669"           # darker teal
 
-    for raw, _beliefs, pack in measurements:
-        if pack <= 0:
-            continue
-        ratio = raw / pack
+    # Plot points — synthetic smaller, production larger
+    for raw, ratio, source in combined:
         cx = to_x(raw)
-        cy = to_y(pack)
-        color = color_for_ratio(ratio)
+        cy = to_y(ratio)
+        if source == "synthetic":
+            r_dot = 4
+            color = "#94a3b8"
+            stroke = "#64748b"
+        else:
+            r_dot = 6
+            color = color_for_ratio(ratio)
+            stroke = "white"
         parts.append(
-            f'<circle cx="{cx}" cy="{cy}" r="6" fill="{color}" '
-            f'stroke="white" stroke-width="2"/>'
+            f'<circle cx="{cx}" cy="{cy}" r="{r_dot}" fill="{color}" '
+            f'stroke="{stroke}" stroke-width="1.5"/>'
         )
 
-    # Annotation: the actual claim being made
+    # Inline legend (top-left of the plot area)
     parts.append(
-        f'<text x="{to_x(300)}" y="{to_y(50)}" text-anchor="start" '
-        f'font-family="system-ui, sans-serif" font-size="11" '
-        f'fill="#475569">'
-        f'expand respects whatever budget the caller picks — '
-        f'the ratio diverges with raw size at any budget</text>'
+        f'<text x="{to_x(70)}" y="{to_y(80)}" text-anchor="start" '
+        f'font-family="system-ui, sans-serif" font-size="10" '
+        f'fill="#94a3b8" font-style="italic">'
+        f'small gray dots: synthetic scenarios (toy scale)</text>'
+    )
+    parts.append(
+        f'<text x="{to_x(70)}" y="{to_y(60)}" text-anchor="start" '
+        f'font-family="system-ui, sans-serif" font-size="10" '
+        f'fill="#475569" font-style="italic">'
+        f'large colored dots: real Claude Code sessions across {n_production} projects</text>'
     )
 
     # Footer
@@ -1191,8 +1210,8 @@ def render_production_chart_svg(
         '<text x="360" y="468" text-anchor="middle" '
         'font-family="system-ui, sans-serif" font-size="10" '
         'fill="#94a3b8">'
-        'github.com/immartian/bellamem · 15 anonymised sessions, '
-        'measured locally, no content extracted'
+        f'github.com/immartian/bellamem · ratio = raw / expand pack '
+        f'tokens · {n_production} anonymised sessions, no content extracted'
         '</text>'
     )
 
@@ -1533,8 +1552,8 @@ def main(out_path: Path | None = None) -> list[ScenarioResult]:
                          encoding="utf-8")
     if PRODUCTION_MEASUREMENTS:
         prod_svg_path.write_text(
-            render_production_chart_svg(
-                PRODUCTION_MEASUREMENTS, PRODUCTION_BUDGET,
+            render_ratio_chart_svg(
+                PRODUCTION_MEASUREMENTS,
                 synthetic_results=results),
             encoding="utf-8",
         )

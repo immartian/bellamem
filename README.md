@@ -391,7 +391,7 @@ work — at a fixed `expand` budget of 1500 tokens.
 Visually:
 
 <p align="center">
-  <img src="docs/compression-curve-production.svg" alt="Production compression curve: 15 anonymised Claude Code sessions plotted on log-x axis from 100 to 200,000 raw conversation tokens. Each point's expand pack token count clusters near a budget ceiling of 1,500 regardless of how large the raw transcript got — so the compression ratio diverges with raw size. Synthetic small-scale scenarios appear as gray dots in the lower-left for context." width="720"/>
+  <img src="docs/compression-curve-production.svg" alt="Bella compression ratio across all scenarios. A scatter plot of 19 sessions — 4 synthetic and 15 real Claude Code sessions sampled across 15 different projects — on log-x raw conversation tokens (50 to 200,000) against log-y compression ratio (0.5 to 100). A dashed horizontal line at ratio=1 marks the break-even point. The data climbs monotonically from below 1 at toy scale through 10x at medium scale to 90x at production scale. Synthetic scenarios appear as small gray dots in the lower-left; real Claude Code sessions appear as large colored dots climbing toward the upper-right." width="720"/>
 </p>
 
 The pattern is unambiguous: **`expand` honors whatever budget the

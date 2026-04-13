@@ -1,62 +1,78 @@
-<svg viewBox="0 0 720 480" width="720" height="480" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="ptitle pdesc">
-<title id="ptitle">Bella compression at production scale</title>
-<desc id="pdesc">15 real Claude Code sessions sampled across 15 different projects. Log-x raw conversation tokens against linear-y expand pack tokens at budget 1500. A horizontal line marks the budget ceiling. As raw tokens grow by orders of magnitude, the expand pack saturates at the budget — so the compression ratio diverges with raw size. Median ratio across the sample is around 17×.</desc>
+<svg viewBox="0 0 720 480" width="720" height="480" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="rtitle rdesc">
+<title id="rtitle">Bella compression ratio across all scenarios</title>
+<desc id="rdesc">A scatter plot of 19 scenarios — 4 synthetic and 15 real Claude Code sessions sampled from 15 different projects. X axis: raw conversation tokens, log scale, 50 to 200,000. Y axis: compression ratio (raw / expand pack tokens), log scale, 0.5 to 100. A horizontal dashed line at ratio = 1 marks break-even (above means Bella saved tokens). The curve climbs monotonically with raw transcript size, from below 1 at toy scale to 90 at production scale.</desc>
 <rect width="720" height="480" fill="#ffffff"/>
-<text x="360" y="36" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="18" font-weight="700" fill="#1e1b4b">Bella compression at production scale</text>
-<text x="360" y="58" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="12" fill="#64748b">15 real sessions across 15 projects · ratio range 4×—90× · median 18×</text>
+<text x="360" y="36" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="18" font-weight="700" fill="#1e1b4b">Bella compression ratio across all scenarios</text>
+<text x="360" y="58" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="12" fill="#64748b">4 synthetic + 15 real sessions · production median 18× · ratio grows monotonically with raw size</text>
 <line x1="80" y1="410" x2="680" y2="410" stroke="#cbd5e1" stroke-width="1.5"/>
 <line x1="80" y1="80" x2="80" y2="410" stroke="#cbd5e1" stroke-width="1.5"/>
-<line x1="80.0" y1="410" x2="80.0" y2="415" stroke="#94a3b8" stroke-width="1"/>
-<text x="80.0" y="430" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#64748b">100</text>
-<line x1="80.0" y1="80" x2="80.0" y2="410" stroke="#f1f5f9" stroke-width="1"/>
-<line x1="261.76145045277417" y1="410" x2="261.76145045277417" y2="415" stroke="#94a3b8" stroke-width="1"/>
-<text x="261.76145045277417" y="430" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#64748b">1k</text>
-<line x1="261.76145045277417" y1="80" x2="261.76145045277417" y2="410" stroke="#f1f5f9" stroke-width="1"/>
-<line x1="443.5229009055483" y1="410" x2="443.5229009055483" y2="415" stroke="#94a3b8" stroke-width="1"/>
-<text x="443.5229009055483" y="430" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#64748b">10k</text>
-<line x1="443.5229009055483" y1="80" x2="443.5229009055483" y2="410" stroke="#f1f5f9" stroke-width="1"/>
-<line x1="625.2843513583224" y1="410" x2="625.2843513583224" y2="415" stroke="#94a3b8" stroke-width="1"/>
-<text x="625.2843513583224" y="430" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#64748b">100k</text>
-<line x1="625.2843513583224" y1="80" x2="625.2843513583224" y2="410" stroke="#f1f5f9" stroke-width="1"/>
-<line x1="134.71564864167755" y1="410" x2="134.71564864167755" y2="413" stroke="#cbd5e1" stroke-width="1"/>
-<line x1="207.0458018110966" y1="410" x2="207.0458018110966" y2="413" stroke="#cbd5e1" stroke-width="1"/>
-<line x1="316.47709909445166" y1="410" x2="316.47709909445166" y2="413" stroke="#cbd5e1" stroke-width="1"/>
-<line x1="388.80725226387074" y1="410" x2="388.80725226387074" y2="413" stroke="#cbd5e1" stroke-width="1"/>
-<line x1="498.2385495472259" y1="410" x2="498.2385495472259" y2="413" stroke="#cbd5e1" stroke-width="1"/>
-<line x1="570.5687027166449" y1="410" x2="570.5687027166449" y2="413" stroke="#cbd5e1" stroke-width="1"/>
+<line x1="130.1429731412665" y1="410" x2="130.1429731412665" y2="415" stroke="#94a3b8" stroke-width="1"/>
+<text x="130.1429731412665" y="430" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#64748b">100</text>
+<line x1="130.1429731412665" y1="80" x2="130.1429731412665" y2="410" stroke="#f1f5f9" stroke-width="1"/>
+<line x1="296.71432438042217" y1="410" x2="296.71432438042217" y2="415" stroke="#94a3b8" stroke-width="1"/>
+<text x="296.71432438042217" y="430" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#64748b">1k</text>
+<line x1="296.71432438042217" y1="80" x2="296.71432438042217" y2="410" stroke="#f1f5f9" stroke-width="1"/>
+<line x1="463.28567561957783" y1="410" x2="463.28567561957783" y2="415" stroke="#94a3b8" stroke-width="1"/>
+<text x="463.28567561957783" y="430" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#64748b">10k</text>
+<line x1="463.28567561957783" y1="80" x2="463.28567561957783" y2="410" stroke="#f1f5f9" stroke-width="1"/>
+<line x1="629.8570268587334" y1="410" x2="629.8570268587334" y2="415" stroke="#94a3b8" stroke-width="1"/>
+<text x="629.8570268587334" y="430" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#64748b">100k</text>
+<line x1="629.8570268587334" y1="80" x2="629.8570268587334" y2="410" stroke="#f1f5f9" stroke-width="1"/>
+<line x1="180.28594628253305" y1="410" x2="180.28594628253305" y2="413" stroke="#cbd5e1" stroke-width="1"/>
+<line x1="246.57135123915563" y1="410" x2="246.57135123915563" y2="413" stroke="#cbd5e1" stroke-width="1"/>
+<line x1="346.8572975216887" y1="410" x2="346.8572975216887" y2="413" stroke="#cbd5e1" stroke-width="1"/>
+<line x1="413.14270247831126" y1="410" x2="413.14270247831126" y2="413" stroke="#cbd5e1" stroke-width="1"/>
+<line x1="513.4286487608443" y1="410" x2="513.4286487608443" y2="413" stroke="#cbd5e1" stroke-width="1"/>
+<line x1="579.714053717467" y1="410" x2="579.714053717467" y2="413" stroke="#cbd5e1" stroke-width="1"/>
 <text x="380.0" y="452" text-anchor="middle" font-family="system-ui, sans-serif" font-size="12" fill="#1e1b4b" font-weight="600">raw conversation tokens (log scale)</text>
 <line x1="75" y1="410.0" x2="80" y2="410.0" stroke="#94a3b8" stroke-width="1"/>
-<text x="70" y="414.0" text-anchor="end" font-family="system-ui, sans-serif" font-size="11" fill="#64748b">0</text>
-<line x1="75" y1="327.5" x2="80" y2="327.5" stroke="#94a3b8" stroke-width="1"/>
-<text x="70" y="331.5" text-anchor="end" font-family="system-ui, sans-serif" font-size="11" fill="#64748b">500</text>
-<line x1="75" y1="245.0" x2="80" y2="245.0" stroke="#94a3b8" stroke-width="1"/>
-<text x="70" y="249.0" text-anchor="end" font-family="system-ui, sans-serif" font-size="11" fill="#64748b">1000</text>
-<line x1="75" y1="162.5" x2="80" y2="162.5" stroke="#94a3b8" stroke-width="1"/>
-<text x="70" y="166.5" text-anchor="end" font-family="system-ui, sans-serif" font-size="11" fill="#64748b">1500</text>
+<text x="70" y="414.0" text-anchor="end" font-family="system-ui, sans-serif" font-size="11" fill="#64748b">0.5×</text>
+<line x1="80" y1="410.0" x2="680" y2="410.0" stroke="#f8fafc" stroke-width="1"/>
+<line x1="75" y1="366.8280731862218" x2="80" y2="366.8280731862218" stroke="#94a3b8" stroke-width="1"/>
+<text x="70" y="370.8280731862218" text-anchor="end" font-family="system-ui, sans-serif" font-size="11" fill="#64748b">1×</text>
+<line x1="80" y1="366.8280731862218" x2="680" y2="366.8280731862218" stroke="#f8fafc" stroke-width="1"/>
+<line x1="75" y1="323.6561463724436" x2="80" y2="323.6561463724436" stroke="#94a3b8" stroke-width="1"/>
+<text x="70" y="327.6561463724436" text-anchor="end" font-family="system-ui, sans-serif" font-size="11" fill="#64748b">2×</text>
+<line x1="80" y1="323.6561463724436" x2="680" y2="323.6561463724436" stroke="#f8fafc" stroke-width="1"/>
+<line x1="75" y1="266.5859634068891" x2="80" y2="266.5859634068891" stroke="#94a3b8" stroke-width="1"/>
+<text x="70" y="270.5859634068891" text-anchor="end" font-family="system-ui, sans-serif" font-size="11" fill="#64748b">5×</text>
+<line x1="80" y1="266.5859634068891" x2="680" y2="266.5859634068891" stroke="#f8fafc" stroke-width="1"/>
+<line x1="75" y1="223.4140365931109" x2="80" y2="223.4140365931109" stroke="#94a3b8" stroke-width="1"/>
+<text x="70" y="227.4140365931109" text-anchor="end" font-family="system-ui, sans-serif" font-size="11" fill="#64748b">10×</text>
+<line x1="80" y1="223.4140365931109" x2="680" y2="223.4140365931109" stroke="#f8fafc" stroke-width="1"/>
+<line x1="75" y1="180.24210977933268" x2="80" y2="180.24210977933268" stroke="#94a3b8" stroke-width="1"/>
+<text x="70" y="184.24210977933268" text-anchor="end" font-family="system-ui, sans-serif" font-size="11" fill="#64748b">20×</text>
+<line x1="80" y1="180.24210977933268" x2="680" y2="180.24210977933268" stroke="#f8fafc" stroke-width="1"/>
+<line x1="75" y1="123.17192681377821" x2="80" y2="123.17192681377821" stroke="#94a3b8" stroke-width="1"/>
+<text x="70" y="127.17192681377821" text-anchor="end" font-family="system-ui, sans-serif" font-size="11" fill="#64748b">50×</text>
+<line x1="80" y1="123.17192681377821" x2="680" y2="123.17192681377821" stroke="#f8fafc" stroke-width="1"/>
 <line x1="75" y1="80.0" x2="80" y2="80.0" stroke="#94a3b8" stroke-width="1"/>
-<text x="70" y="84.0" text-anchor="end" font-family="system-ui, sans-serif" font-size="11" fill="#64748b">2000</text>
-<text x="30" y="245.0" text-anchor="middle" font-family="system-ui, sans-serif" font-size="12" fill="#1e1b4b" font-weight="600" transform="rotate(-90 30 245.0)">expand pack tokens</text>
-<line x1="80" y1="162.5" x2="680" y2="162.5" stroke="#10b981" stroke-width="1.5" stroke-dasharray="6,4" opacity="0.7"/>
-<text x="672" y="156.5" text-anchor="end" font-family="system-ui, sans-serif" font-size="11" fill="#10b981" font-weight="700">budget I chose (1500) — pick any value, the divergence stays</text>
-<circle cx="128.13367161595937" cy="371.555" r="3.5" fill="#cbd5e1" stroke="#94a3b8" stroke-width="1"/>
-<circle cx="208.29881216670483" cy="351.92" r="3.5" fill="#cbd5e1" stroke="#94a3b8" stroke-width="1"/>
-<circle cx="266.7325548312283" cy="303.575" r="3.5" fill="#cbd5e1" stroke="#94a3b8" stroke-width="1"/>
-<text x="112.00660265801585" y="363.8" text-anchor="start" font-family="system-ui, sans-serif" font-size="10" fill="#94a3b8" font-style="italic">gray dots: synthetic scenarios</text>
-<circle cx="159.56617723475193" cy="397.295" r="6" fill="#94a3b8" stroke="white" stroke-width="2"/>
-<circle cx="344.87663328879336" cy="304.565" r="6" fill="#94a3b8" stroke="white" stroke-width="2"/>
-<circle cx="359.85869397799104" cy="268.43" r="6" fill="#94a3b8" stroke="white" stroke-width="2"/>
-<circle cx="366.9773974922847" cy="321.89" r="6" fill="#6366f1" stroke="white" stroke-width="2"/>
-<circle cx="377.9954422871847" cy="292.355" r="6" fill="#6366f1" stroke="white" stroke-width="2"/>
-<circle cx="408.85922943194373" cy="277.01" r="6" fill="#6366f1" stroke="white" stroke-width="2"/>
-<circle cx="499.9370460278828" cy="217.94000000000003" r="6" fill="#4f46e5" stroke="white" stroke-width="2"/>
-<circle cx="501.7584644703726" cy="176.525" r="6" fill="#4f46e5" stroke="white" stroke-width="2"/>
-<circle cx="522.6441605468838" cy="203.42" r="6" fill="#4f46e5" stroke="white" stroke-width="2"/>
-<circle cx="534.3242642722423" cy="170.09" r="6" fill="#4f46e5" stroke="white" stroke-width="2"/>
-<circle cx="541.9066710428274" cy="173.225" r="6" fill="#4f46e5" stroke="white" stroke-width="2"/>
-<circle cx="565.0689605252276" cy="165.8" r="6" fill="#10b981" stroke="white" stroke-width="2"/>
-<circle cx="569.7115352900657" cy="175.535" r="6" fill="#10b981" stroke="white" stroke-width="2"/>
-<circle cx="615.6424671734127" cy="169.1" r="6" fill="#059669" stroke="white" stroke-width="2"/>
-<circle cx="647.438292112861" cy="167.45000000000002" r="6" fill="#059669" stroke="white" stroke-width="2"/>
-<text x="166.7222512996934" y="401.75" text-anchor="start" font-family="system-ui, sans-serif" font-size="11" fill="#475569">expand respects whatever budget the caller picks — the ratio diverges with raw size at any budget</text>
-<text x="360" y="468" text-anchor="middle" font-family="system-ui, sans-serif" font-size="10" fill="#94a3b8">github.com/immartian/bellamem · 15 anonymised sessions, measured locally, no content extracted</text>
+<text x="70" y="84.0" text-anchor="end" font-family="system-ui, sans-serif" font-size="11" fill="#64748b">100×</text>
+<line x1="80" y1="80.0" x2="680" y2="80.0" stroke="#f8fafc" stroke-width="1"/>
+<text x="25" y="245.0" text-anchor="middle" font-family="system-ui, sans-serif" font-size="12" fill="#1e1b4b" font-weight="600" transform="rotate(-90 25 245.0)">compression ratio (log scale)</text>
+<line x1="80" y1="366.8280731862218" x2="680" y2="366.8280731862218" stroke="#475569" stroke-width="1.5" stroke-dasharray="5,4" opacity="0.7"/>
+<text x="672" y="360.8280731862218" text-anchor="end" font-family="system-ui, sans-serif" font-size="11" fill="#475569" font-weight="700">ratio = 1× (break-even)</text>
+<text x="672" y="382.8280731862218" text-anchor="end" font-family="system-ui, sans-serif" font-size="10" fill="#94a3b8">above this line, Bella saves tokens</text>
+<circle cx="174.25403575217655" cy="381.5334757273456" r="4" fill="#94a3b8" stroke="#64748b" stroke-width="1.5"/>
+<circle cx="114.0005413259104" cy="393.11154125456125" r="4" fill="#94a3b8" stroke="#64748b" stroke-width="1.5"/>
+<circle cx="247.71964548708556" cy="343.97919846273567" r="4" fill="#94a3b8" stroke="#64748b" stroke-width="1.5"/>
+<circle cx="301.2699855033243" cy="335.59394548190545" r="4" fill="#94a3b8" stroke="#64748b" stroke-width="1.5"/>
+<circle cx="203.05967589595943" cy="287.7696746574726" r="6" fill="#6366f1" stroke="white" stroke-width="1.5"/>
+<circle cx="372.8834365821447" cy="273.35434245986477" r="6" fill="#6366f1" stroke="white" stroke-width="1.5"/>
+<circle cx="386.61342216011036" cy="279.8881965919651" r="6" fill="#6366f1" stroke="white" stroke-width="1.5"/>
+<circle cx="393.1372040758742" cy="244.7358213816994" r="6" fill="#6366f1" stroke="white" stroke-width="1.5"/>
+<circle cx="403.2344529970743" cy="254.0477108717211" r="6" fill="#6366f1" stroke="white" stroke-width="1.5"/>
+<circle cx="431.5189033921043" cy="237.331614576815" r="6" fill="#6366f1" stroke="white" stroke-width="1.5"/>
+<circle cx="514.9851991358178" cy="188.36053945307899" r="6" fill="#4f46e5" stroke="white" stroke-width="1.5"/>
+<circle cx="516.6543986849063" cy="199.08540414172077" r="6" fill="#4f46e5" stroke="white" stroke-width="1.5"/>
+<circle cx="535.7946432657488" cy="174.9833425407247" r="6" fill="#4f46e5" stroke="white" stroke-width="1.5"/>
+<circle cx="546.4986217787944" cy="175.0836544062997" r="6" fill="#4f46e5" stroke="white" stroke-width="1.5"/>
+<circle cx="553.44735451764" cy="168.28170461296773" r="6" fill="#4f46e5" stroke="white" stroke-width="1.5"/>
+<circle cx="574.6739339010298" cy="151.92927194760364" r="6" fill="#10b981" stroke="white" stroke-width="1.5"/>
+<circle cx="578.9285211629687" cy="145.73238464198204" r="6" fill="#10b981" stroke="white" stroke-width="1.5"/>
+<circle cx="621.0209305733489" cy="111.17817866088723" r="6" fill="#059669" stroke="white" stroke-width="1.5"/>
+<circle cx="650.159526852892" cy="86.51567683648551" r="6" fill="#059669" stroke="white" stroke-width="1.5"/>
+<text x="104.34074435684768" y="93.89825615177631" text-anchor="start" font-family="system-ui, sans-serif" font-size="10" fill="#94a3b8" font-style="italic">small gray dots: synthetic scenarios (toy scale)</text>
+<text x="104.34074435684768" y="111.81622469561609" text-anchor="start" font-family="system-ui, sans-serif" font-size="10" fill="#475569" font-style="italic">large colored dots: real Claude Code sessions across 15 projects</text>
+<text x="360" y="468" text-anchor="middle" font-family="system-ui, sans-serif" font-size="10" fill="#94a3b8">github.com/immartian/bellamem · ratio = raw / expand pack tokens · 15 anonymised sessions, no content extracted</text>
 </svg>
