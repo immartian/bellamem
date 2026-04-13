@@ -84,6 +84,62 @@ All 15 sessions measured locally on a developer machine with `python docs/scenar
 
 Note on Claude Code context windows: a 500k-token Claude Code context window typically contains ~5–10% conversation text (user/assistant turns) and ~90–95% tool output (file reads, bash output, search results, system reminders). Bella ingests only the conversation portion — that's the part with decisive structure (decisions, disputes, causes, self-observations). Bella doesn't claim to compress tool output; it claims to compress the conversation that earns the structure. The production ratios above are on the thing Bella actually targets.
 
+## Semantic robustness — does the graph capture meaning or surface words?
+
+For each scenario, the same underlying question is asked 5 different
+ways (different word choice, different syntax, different formality). If
+the graph represents meaning, `expand` should return roughly the same
+top-N beliefs across all 5 phrasings (high Jaccard overlap). If it's
+just cosine-matching surface text, different phrasings will cosine-match
+different beliefs and the packs will diverge.
+
+**No LLM judge** — pure set overlap, no circularity. Complements the
+LLM-judge bench rather than replacing it.
+
+| scenario | n | mean Jaccard | min | max | core fraction | ∩/∪ |
+|---|---:|---:|---:|---:|---:|---:|
+| `flaky-test` | 5 | 1.00 | 1.00 | 1.00 | 1.00 | 7/7 |
+| `rejected-refactor` | 5 | 1.00 | 1.00 | 1.00 | 1.00 | 3/3 |
+| `long-debug` | 5 | 0.64 | 0.57 | 1.00 | 0.40 | 6/15 |
+| `sprint` | 5 | 0.64 | 0.54 | 0.74 | 0.40 | 12/30 |
+
+**Metric definitions:**
+
+- `mean Jaccard` — average of all 10 pairwise Jaccard overlaps (the
+  primary signal). 1.0 means every pair of packs is identical; 0.5
+  means packs share about half their beliefs.
+- `core fraction` — |intersection| / |union|. The fraction of beliefs
+  that appear in **every** rephrasing's pack — the semantically stable
+  core, invariant to phrasing.
+- `∩/∪` — intersection size / union size, raw counts.
+
+**Interpretation:**
+
+- `flaky-test` and `rejected-refactor` trivially score 1.00 because
+  their compressed graphs are small enough (3–7 beliefs) that the full
+  budget fits the entire graph. When pack ≈ graph, phrasing can't
+  change what comes back. These rows aren't evidence of semantic
+  quality; they're evidence that tiny graphs are budget-trivial.
+- `long-debug` and `sprint` are the real signal. With 20-belief packs
+  drawn from 30-belief unions, **~40% of beliefs are stable across all
+  5 rephrasings** and pairwise mean Jaccard is ~0.64. The semantic
+  core is genuinely stable; the outer ring of the pack shifts with
+  phrasing.
+
+**Important caveat:** this harness uses `HashEmbedder` — the zero-dep
+deterministic hash — which is literally the *weakest* semantic signal
+available. It hashes text bytes to vectors with no language model
+involvement. A re-run with `text-embedding-3-small` (what `bellamem save`
+uses in production) would almost certainly score higher. So the 0.64
+pairwise mean is a **lower bound**, not a ceiling. It's evidence that
+even under the worst embedder, 40% of the pack is stable under
+rephrasing — and that fraction should improve with a real embedder.
+
+Dogfood checkpoint, not a published headline. The graph was built via
+synthetic `_ingest_dialogue` with pre-specified structure, not real
+conversation flow. A proper semantic robustness run against the
+production OpenAI-embedded forest is the right follow-up experiment.
+
 ## Per-scenario synthetic detail
 
 Read each row as: a dialogue happens, Bella ingests it, time passes,

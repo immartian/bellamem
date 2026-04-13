@@ -170,6 +170,56 @@ def test_compression_ratio_grows_with_scale(results):
     )
 
 
+def test_rephrasing_robustness_core_stable_above_floor(results):
+    """Semantic-quality checkpoint.
+
+    For each scenario, the same underlying question is asked 5 different
+    ways. We measure how much the `expand` packs overlap across rephrasings
+    via pairwise Jaccard. If the graph represents MEANING, overlap is high;
+    if it's just cosine matching surface text, overlap is low.
+
+    Floor: every scenario must produce mean pairwise Jaccard >= 0.4.
+    This is a conservative threshold — the test should loudly fail if
+    the graph becomes essentially cosine-driven (e.g. after a regression
+    that breaks mass-weighting or field routing).
+
+    Also asserts that on the larger scenarios (where pack << graph,
+    so phrasing can genuinely change what comes back), there's a
+    non-trivial stable core — at least 25% of the belief union
+    appears in EVERY rephrasing's pack. This is the real semantic
+    stability signal; the small scenarios trivially pass because
+    their packs equal their whole graphs.
+
+    Note: the harness uses HashEmbedder (zero-dep deterministic), which
+    is the weakest semantic signal. OpenAI embeddings would likely
+    produce higher numbers. 0.4 is a floor, not a target.
+    """
+    for r in results:
+        assert r.rephrasing is not None, (
+            f"scenario {r.name!r} has no rephrasings configured"
+        )
+        rp = r.rephrasing
+        assert rp.n_rephrasings >= 5, (
+            f"{r.name!r} has only {rp.n_rephrasings} rephrasings "
+            f"(need >= 5 for a meaningful signal)"
+        )
+        assert rp.mean_jaccard >= 0.4, (
+            f"{r.name!r} rephrasing mean Jaccard dropped to "
+            f"{rp.mean_jaccard:.2f} (floor: 0.4). The graph may have "
+            f"become cosine-driven — check expand's routing or mass "
+            f"differentiation."
+        )
+        # On non-trivial scenarios (pack < 30 beliefs means budget
+        # isn't fitting the whole graph), the core should be non-empty.
+        if rp.union_size >= 10:
+            assert rp.core_fraction >= 0.25, (
+                f"{r.name!r} has a large union ({rp.union_size}) but "
+                f"only {rp.core_fraction:.2f} core fraction — less "
+                f"than 25% of beliefs are stable across all 5 "
+                f"rephrasings. Semantic robustness regressed."
+            )
+
+
 def test_rejected_refactor_dispute_survives(results):
     """The rejected-refactor scenario's whole point is that a single
     user denial creates a durable dispute. After compression, the
