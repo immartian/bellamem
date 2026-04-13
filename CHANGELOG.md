@@ -4,7 +4,7 @@ All notable changes will be documented in this file. This project aims
 for [Semantic Versioning](https://semver.org). Until v1.0, everything
 is subject to change.
 
-## [0.1.2] — Unreleased — second user-reported fix, classifier rot fixes, scenarios harness
+## [0.1.2] — 2026-04-13 — second user-reported fix, classifier rot fixes, scenarios harness
 
 The second patch cycle. Ships another user-reported fix from
 @Salgado-Andres, two structural fixes to the ingest classifier
