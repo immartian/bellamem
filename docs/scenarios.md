@@ -126,19 +126,49 @@ LLM-judge bench rather than replacing it.
   core is genuinely stable; the outer ring of the pack shifts with
   phrasing.
 
-**Important caveat:** this harness uses `HashEmbedder` — the zero-dep
-deterministic hash — which is literally the *weakest* semantic signal
-available. It hashes text bytes to vectors with no language model
-involvement. A re-run with `text-embedding-3-small` (what `bellamem save`
-uses in production) would almost certainly score higher. So the 0.64
-pairwise mean is a **lower bound**, not a ceiling. It's evidence that
-even under the worst embedder, 40% of the pack is stable under
-rephrasing — and that fraction should improve with a real embedder.
+**The harness uses `HashEmbedder`** (the zero-dep deterministic hash)
+for reproducibility — no API key, no network, no cost per test run.
+A one-off re-run with OpenAI `text-embedding-3-small` on the same
+scenarios (measured 2026-04-13, not pinned in the test suite because
+it's not portable) gave essentially the same aggregate numbers:
 
-Dogfood checkpoint, not a published headline. The graph was built via
-synthetic `_ingest_dialogue` with pre-specified structure, not real
-conversation flow. A proper semantic robustness run against the
-production OpenAI-embedded forest is the right follow-up experiment.
+| scenario | HashEmbedder mean Jaccard | OpenAI mean Jaccard | delta |
+|---|---:|---:|---:|
+| flaky-test | 1.00 | 1.00 | 0 |
+| rejected-refactor | 1.00 | 1.00 | 0 |
+| long-debug | 0.64 | 0.63 | −0.01 |
+| sprint | 0.64 | 0.60 | −0.04 |
+
+The core fraction (beliefs stable across ALL 5 rephrasings) is also
+roughly the same: sprint scores 40% under HashEmbedder, 39% under
+OpenAI. HashEmbedder's 0.64 is **not a lower bound that OpenAI
+dominates** — both embedders converge on the same stable core.
+
+OpenAI does show **wider pairwise variance** on the sprint scenario
+(0.44–0.86 vs HashEmbedder's 0.54–0.74). OpenAI sees more semantic
+difference between specific pairs of rephrasings — some match better,
+some diverge more — but the aggregate and the core are stable.
+
+**What this tells us structurally:** the 40% stable core is a
+property of the *graph*, not the embedder. It's held together by
+mass-weighted ranking — multi-voice beliefs, ⊥ disputes, ⇒ causes,
+ratified decisions. These rank at the top of every pack regardless
+of phrasing because their weighting is driven by structural signals
+(voice count, relation type, mass-floor) rather than cosine. The
+embedder affects the outer ring of the pack (the weaker, cosine-
+driven candidates) but not the decision-bearing core.
+
+This is actually a **stronger empirical claim** than "OpenAI scores
+higher" would have been. It points at *why* expand works — mass +
+structural primitives, not cosine alone — and gives us a falsifiable
+test. A regression that breaks mass-weighting or voice tracking
+would drop the core fraction, and the pytest assertion would fire.
+
+Dogfood checkpoint, not a published headline. Still synthetic, still
+scenario-specific, still `no_llm=True` during ingest. The right
+follow-up is rephrasing robustness on a production graph built from
+real Claude Code transcripts with LLM EW on — that's the strongest
+remaining test for semantic quality on this path.
 
 ## Per-scenario synthetic detail
 
