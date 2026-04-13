@@ -51,7 +51,7 @@ def test_template_is_bundled_and_readable():
     # Claude Code permission check to auto-approve.
     assert "allowed-tools: Bash(bellamem:*)" in template
     # Post-instructions block must be present for Claude to synthesize.
-    assert "subcommand of BellaMem" in template
+    assert "subcommand of Bella" in template
     assert "Synthesize in under 300 words" in template
 
 

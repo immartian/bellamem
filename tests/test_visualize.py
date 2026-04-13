@@ -54,7 +54,7 @@ def _bella_with_disputes_and_causes() -> Bella:
 def test_to_dot_emits_header_and_closes():
     b = _bella_with_disputes_and_causes()
     dot = to_dot(b.fields)
-    assert dot.startswith("digraph BellaMem {")
+    assert dot.startswith("digraph Bella {")
     assert dot.rstrip().endswith("}")
 
 

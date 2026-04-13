@@ -737,7 +737,7 @@ def cmd_save(args: argparse.Namespace) -> int:
 
 
 def cmd_install_commands(args: argparse.Namespace) -> int:
-    """Install the BellaMem Claude Code slash command into a commands dir.
+    """Install the Bella Claude Code slash command into a commands dir.
 
     Default destination is `~/.claude/commands/bellamem.md` (global, works
     in every project). `--project` switches to `./.claude/commands/` for a

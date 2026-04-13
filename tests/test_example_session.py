@@ -2,7 +2,7 @@
 
 The README's worked example cites specific numbers (belief counts,
 disputes, causes, limbo, Shannon entropy) that come from running
-example_session.py against the real BellaMem core. This test runs the
+example_session.py against the real Bella core. This test runs the
 same script and asserts the numbers match so the example can't silently
 drift when core behavior changes.
 

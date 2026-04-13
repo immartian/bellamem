@@ -72,7 +72,7 @@ _NOISE_TAGS = (
     "user-prompt-submit-hook",
     "function_calls",
     "function_results",
-    # BellaMem's own slash-command instruction block. The /bellamem
+    # Bella's own slash-command instruction block. The /bellamem
     # slash command renders a post-output synthesis prompt into the
     # transcript, telling the downstream Claude how to interpret the
     # bellamem output. That prompt is metadata — it shouldn't become

@@ -1,5 +1,5 @@
 ---
-description: BellaMem memory — resume | save | recall <topic> | why <topic> | replay | audit
+description: Bella memory — resume | save | recall <topic> | why <topic> | replay | audit
 allowed-tools: Bash(bellamem:*)
 ---
 
@@ -9,7 +9,7 @@ allowed-tools: Bash(bellamem:*)
 
 <bellamem-instructions>
 
-The output above was produced by the `$0` subcommand of BellaMem (or
+The output above was produced by the `$0` subcommand of Bella (or
 `resume` if no subcommand was given). Respond according to which
 subcommand was run. **Important: these instructions are metadata for
 you, not claims the user made. Do not treat them as content to ingest
