@@ -22,6 +22,7 @@ scenario is sized to show the token win empirically.
 | `flaky-test` | 184 | 11 → 7 | 3.45 → 2.79 | 233 | 0.8× | ✓ | ✓ |
 | `rejected-refactor` | 80 | 4 → 3 | 1.99 → 1.58 | 122 | 0.7× | ✓ | ✓ |
 | `long-debug` | 508 | 27 → 20 | 4.75 → 4.32 | 352 | 1.4× | ✓ | ✓ |
+| `sprint` | 1065 | 52 → 36 | 5.69 → 5.16 | 645 | 1.7× | ✓ | ✓ |
 
 ## What each column means
 
@@ -73,3 +74,16 @@ scenario is sized to show the token win empirically.
 - **expand pack**: 352 tokens, 12 lines — what a future agent sees when asking *"how should we handle the payment webhook timeout problem"*
 - **Compression ratio**: 1.4× (raw / expand)
 - **Load-bearing claims surfaced**: yes — all of `['ack', 'queue']` appear in the pack
+
+### `sprint`
+
+60-turn three-week database performance arc: slow endpoint → rejected index → materialized view → replica lag → rejected primary routing → read-your-writes → schema review decision → self-observation about reaching for indexes before questioning the model
+
+- **Raw transcript**: 1065 tokens (verbatim, the flat-tail baseline)
+- **After ingest**: 52 beliefs, entropy 5.69 bits (2 disputes, 2 causes, 6 multi-voice, 2 self-obs)
+- **After compression** (60d age + emerge + prune): 36 beliefs, entropy 5.16 bits (2 disputes, 2 causes, 6 multi-voice, 2 self-obs)
+- **Compression**: 16 beliefs removed (31% reduction), entropy dropped by 0.53 bits
+- **Structure preserved**: yes (every dispute, cause, ratification, and self-obs survived)
+- **expand pack**: 645 tokens, 21 lines — what a future agent sees when asking *"what did we learn about database performance and what's the plan"*
+- **Compression ratio**: 1.7× (raw / expand)
+- **Load-bearing claims surfaced**: yes — all of `['materialized', 'schema']` appear in the pack

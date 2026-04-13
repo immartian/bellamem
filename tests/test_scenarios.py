@@ -99,6 +99,42 @@ def test_long_debug_actually_compresses_tokens(results):
     )
 
 
+def test_compression_ratio_grows_with_scale(results):
+    """The empirical tendency: as raw transcript size grows, the
+    compression ratio improves because Bella's per-belief metadata
+    overhead amortizes over more dialogue. This pins the trend so
+    future regressions in expand, ingest, or prune that flatten
+    the curve fail loudly.
+
+    Sort scenarios by raw transcript size and assert that the
+    sprint scenario (the largest) has a strictly higher ratio than
+    the long-debug scenario (the previous largest), which in turn
+    has a higher ratio than the small scenarios.
+    """
+    by_size = sorted(results, key=lambda r: r.raw_tokens)
+    smallest = by_size[0]
+    long_debug = _by_name(results, "long-debug")
+    sprint = _by_name(results, "sprint")
+
+    assert sprint.raw_tokens > long_debug.raw_tokens, (
+        f"sprint ({sprint.raw_tokens} raw) must be larger than "
+        f"long-debug ({long_debug.raw_tokens} raw) to test the trend"
+    )
+    assert sprint.compression_ratio > long_debug.compression_ratio, (
+        f"compression ratio must improve as dialogue grows; "
+        f"long-debug={long_debug.compression_ratio:.2f}× at "
+        f"{long_debug.raw_tokens} raw, sprint="
+        f"{sprint.compression_ratio:.2f}× at {sprint.raw_tokens} raw"
+    )
+    assert long_debug.compression_ratio > smallest.compression_ratio, (
+        f"compression ratio must improve as dialogue grows; "
+        f"smallest={smallest.compression_ratio:.2f}× at "
+        f"{smallest.raw_tokens} raw, long-debug="
+        f"{long_debug.compression_ratio:.2f}× at "
+        f"{long_debug.raw_tokens} raw"
+    )
+
+
 def test_rejected_refactor_dispute_survives(results):
     """The rejected-refactor scenario's whole point is that a single
     user denial creates a durable dispute. After compression, the
