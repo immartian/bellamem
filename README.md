@@ -122,7 +122,7 @@ what* — in far fewer tokens, and across the session boundaries where
 the left column can't go.
 
 <p align="center">
-  <img src="docs/brand/context-collapse.png" alt="The context rot is the real wall of Agentic AI. Left: six session-history chunks feed into a faded terminal via /compact and /clear, retaining 8% and 0% respectively across Claude Code, Codex, Cursor, Windsurf, OpenClaw. Right: the same chunks feed into a luminous belief-graph orb via bella save, which then restores a crisp terminal via bella resume, retaining 92%." width="960"/>
+  <img src="docs/brand/context-collapse.png" alt="The context rot is the real wall of Agentic AI — same history, two futures. Left: six session-history chunks from Claude Code, Codex, Cursor, Windsurf, OpenClaw feed into a faded terminal via /compact and /clear, losing 92—100% of the decisive context (entropy HIGH). Right: the same chunks feed into a luminous belief-graph orb via bella save and restore a crisp terminal via bella resume, losing only 8% (entropy LOW)." width="960"/>
 </p>
 
 And the four items on the right are exactly the ones the agent would
