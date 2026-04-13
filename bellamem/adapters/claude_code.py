@@ -379,19 +379,34 @@ def ingest_session(bella: Bella, path: str, *, tail: int | None = None,
         so that's the source line we stamp on the accumulate — not the
         original assistant turn. This preserves "where did the
         ratification come from?" under `sources` queries.
+
+        Target: only the *last* claim extracted from the preceding
+        assistant turn — not every claim. Rationale: a user "ya" /
+        "do it" / "sure" is the user authorising the assistant's
+        most recent offer, not validating every content-marker
+        sentence in the preceding paragraph. Ratifying all pending
+        claims inflated the "top ratified decisions" list with
+        expository prose that the user never actually decided on
+        — the rot this session surfaced when audit + graph inspection
+        showed the strongest m=0.71+ beliefs were mid-discussion
+        speculations like "Pros: ..." and "Cons: ..." from the
+        assistant's own pros/cons lists. Fixes that class of bug.
+
+        If no last claim exists (empty pending), return 0 with no
+        mutation — preserves the "no claims extracted, no
+        ratification" contract from before.
         """
-        n = 0
-        for fname, bid in pending:
-            g = bella.fields.get(fname)
-            if g is None:
-                continue
-            b = g.beliefs.get(bid)
-            if b is None:
-                continue
-            b.accumulate(lr, voice="user",
-                         source=(session_key, user_line))
-            n += 1
-        return n
+        if not pending:
+            return 0
+        fname, bid = pending[-1]
+        g = bella.fields.get(fname)
+        if g is None:
+            return 0
+        b = g.beliefs.get(bid)
+        if b is None:
+            return 0
+        b.accumulate(lr, voice="user", source=(session_key, user_line))
+        return 1
 
     def track(pending: list[tuple[str, str]], result) -> None:
         if result.belief and result.field:
