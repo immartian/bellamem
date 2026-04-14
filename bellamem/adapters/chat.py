@@ -272,6 +272,133 @@ def get_decision_anchor_embeddings() -> list[list[float]]:
     return anchors
 
 
+# Reaction anchors for language-agnostic affirmation/correction detection.
+# Used as the structural fallback in classify_reaction when the English
+# regex word-set returns "neutral" but the turn might still be a
+# short non-English affirmation or correction.
+#
+# Same principle as DECISION_ANCHORS: a small set of canonical phrases
+# in the embedding space, multilingual via the multilingual embedder.
+# A French "oui, d'accord" lands near "yes, ok"; a Spanish "no, así
+# no" lands near "no, not like that". The per-language word lists
+# the regex grew toward stop here — the anchors are a static
+# semantic shape, not a vocabulary that grows.
+AFFIRM_ANCHORS = [
+    # English seeds (longer phrases for richer cluster centers)
+    "yes",
+    "yes, do it",
+    "ok, go ahead",
+    "sure, proceed",
+    "sounds good, let's go",
+    "perfect, ship it",
+    "agreed, that's the plan",
+    # Multilingual seed primers — seed the cluster center closer to
+    # short non-English affirmations so single-token "oui" / "sí" /
+    # "ja" land within threshold via embedding similarity. NOT
+    # literal-match vocabulary; the embedding model still does the
+    # actual scoring.
+    "oui",
+    "oui, vas-y",
+    "d'accord",
+    "sí",
+    "sí, dale",
+    "vale",
+    "ja",
+    "ja, los",
+    "klar",
+]
+
+CORRECT_ANCHORS = [
+    # English seeds
+    "no, don't do that",
+    "stop, that's wrong",
+    "not like that, do it differently",
+    "wrong approach, try another way",
+    "no, instead use this",
+    "actually, not that",
+    # Multilingual seed primers
+    "non",
+    "non, pas comme ça",
+    "no, así no",
+    "nein, nicht so",
+]
+
+_affirm_anchor_cache: dict[str, list[list[float]]] = {}
+_correct_anchor_cache: dict[str, list[list[float]]] = {}
+
+
+def _get_reaction_anchors(
+    cache: dict[str, list[list[float]]],
+    anchors: list[str],
+) -> list[list[float]]:
+    """Lazy-init cache for one reaction-anchor set, keyed by embedder
+    signature (so a HashEmbedder → OpenAI swap recomputes them)."""
+    from ..core.embed import current_embedder
+    emb = current_embedder()
+    sig = emb.name
+    cached = cache.get(sig)
+    if cached is not None:
+        return cached
+    if hasattr(emb, "embed_batch"):
+        try:
+            vectors = list(emb.embed_batch(anchors))
+        except Exception:
+            vectors = [emb.embed(t) for t in anchors]
+    else:
+        vectors = [emb.embed(t) for t in anchors]
+    cache[sig] = vectors
+    return vectors
+
+
+def semantic_reaction_score(text: str) -> tuple[float, float]:
+    """Score a short user turn for affirmation and correction intent
+    using anchor-embedding similarity. Returns (affirm_score, correct_score)
+    each in [0, 1] (max cosine to the respective anchor set).
+
+    Returns (0, 0) on empty text or embedding failure. The caller
+    decides thresholds — typically anything above ~0.55 is a strong
+    semantic match for short utterances under multilingual embeddings.
+
+    This is the language-agnostic complement to the English regex
+    word-set check in classify_reaction. A short non-English turn
+    that the regex misses (because its vocabulary doesn't include
+    "oui" / "vale" / "ja") will still get classified correctly here
+    via the multilingual embedder.
+
+    Cost: one embedding call per short user turn. Cached on disk by
+    DiskCacheEmbedder so re-ingest is free. Skip embedding entirely
+    on long turns (the caller is responsible for the length gate).
+    """
+    if not text or not text.strip():
+        return 0.0, 0.0
+    from ..core.embed import current_embedder, cosine
+    try:
+        emb = current_embedder()
+        q = emb.embed(text)
+    except Exception:
+        return 0.0, 0.0
+    if not q:
+        return 0.0, 0.0
+    try:
+        affirm_vecs = _get_reaction_anchors(_affirm_anchor_cache,
+                                             AFFIRM_ANCHORS)
+        correct_vecs = _get_reaction_anchors(_correct_anchor_cache,
+                                              CORRECT_ANCHORS)
+    except Exception:
+        return 0.0, 0.0
+    a_max = 0.0
+    for v in affirm_vecs:
+        s = cosine(q, v)
+        if s > a_max:
+            a_max = s
+    c_max = 0.0
+    for v in correct_vecs:
+        s = cosine(q, v)
+        if s > c_max:
+            c_max = s
+    return a_max, c_max
+
+
 def semantic_decision_score(belief_embedding: list[float] | None) -> float:
     """Score a belief as decision-bearing, language-agnostic.
 
@@ -464,6 +591,26 @@ def classify_reaction(text: str) -> str:
     Returns one of: "affirm", "correct", "neutral". Used by the turn-pair
     pass in adapters/claude_code.py to retroactively adjust lr on the
     beliefs extracted from the previous assistant turn (P10).
+
+    Two-stage classification:
+
+      Stage 1 — English regex word-set match (fast, deterministic, free).
+                Catches the common English cases at zero cost. Always
+                runs first.
+
+      Stage 2 — Semantic anchor cosine (multilingual, requires real
+                embedder). Runs only when stage 1 returns "neutral" AND
+                the turn is short enough to plausibly be a reaction.
+                Uses AFFIRM_ANCHORS / CORRECT_ANCHORS embedded under
+                the current embedder. A French "oui, d'accord", a
+                Spanish "sí, dale", or a German "ja, los" all get
+                classified correctly here via the multilingual
+                embedder, without any per-language regex pack.
+
+    The cost of stage 2 is one embedding call per short non-English
+    user turn (cached by DiskCacheEmbedder, so re-ingest is free).
+    Stage 2 is skipped entirely on long turns and on HashEmbedder
+    (where cosine is meaningless and the regex is the only signal).
     """
     t = (text or "").strip().lower()
     if not t:
@@ -471,6 +618,7 @@ def classify_reaction(text: str) -> str:
     words = t.split()
     n_words = len(words)
 
+    # ---- Stage 1: English regex word-set match
     # Correction: look for explicit denial in the first half of a short message.
     # Long messages dilute signal — treat them as neutral even if they contain "not".
     if n_words <= 40:
@@ -492,6 +640,30 @@ def classify_reaction(text: str) -> str:
         if words[0].rstrip(",.") in ("ya", "ok", "okay", "yes", "yeah", "agreed"):
             return "affirm"
 
+    # ---- Stage 2: Semantic anchor fallback (multilingual)
+    # Only fires when stage 1 was "neutral" AND the turn is short
+    # enough to plausibly be a reaction (≤20 words, same gate as
+    # stage 1 affirm). Long turns aren't reactions; skip the
+    # embedding cost entirely.
+    if n_words > 20:
+        return "neutral"
+    affirm_score, correct_score = semantic_reaction_score(text)
+    # Thresholds calibrated empirically against multilingual short-
+    # utterance cosines. 0.45 floor is loose enough to catch single-
+    # word non-English affirmations like "d'accord" or "vale" that
+    # land at ~0.45-0.50 cosine to the seeded anchor cluster, but
+    # still tight enough to reject genuinely-neutral content (which
+    # cosines around 0.20-0.35). The differential check prevents
+    # near-tie flip-flops; calibrated wider (0.07) than the floor's
+    # margin so a turn that's borderline both directions falls
+    # back to neutral instead of guessing.
+    AFFIRM_FLOOR = 0.45
+    CORRECT_FLOOR = 0.45
+    DIFFERENTIAL = 0.07
+    if affirm_score >= AFFIRM_FLOOR and affirm_score > correct_score + DIFFERENTIAL:
+        return "affirm"
+    if correct_score >= CORRECT_FLOOR and correct_score > affirm_score + DIFFERENTIAL:
+        return "correct"
     return "neutral"
 
 
