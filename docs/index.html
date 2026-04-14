@@ -3,9 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>bellamem — continuous hypergraph memory for AI agents</title>
+<title>Bella — continuous hypergraph memory for AI agents</title>
 <meta name="description" content="Local, accumulating hypergraph memory for LLM agents. Concepts, not chats. Open source, AGPL-3.0.">
-<meta property="og:title" content="bellamem — continuous hypergraph memory for AI agents">
+<meta property="og:title" content="Bella — continuous hypergraph memory for AI agents">
 <meta property="og:description" content="Concepts, not chats. A local hypergraph that accumulates mass on what gets ratified and decays what doesn't.">
 <meta property="og:image" content="https://raw.githubusercontent.com/immartian/bellamem/master/docs/brand/bella-viz3d-poster.png">
 <style>
@@ -31,7 +31,14 @@
     background: radial-gradient(ellipse at center, #1a2440 0%, #0b1220 60%);
     padding: 80px 24px 60px; text-align: center; border-bottom: 1px solid var(--panel2);
   }
-  .hero h1 { margin: 0 0 8px 0; font-size: 42px; font-weight: 700; letter-spacing: -0.5px; }
+  .hero .logo {
+    display: block; margin: 0 auto 16px; max-width: 480px; width: 100%;
+    height: auto;
+  }
+  .hero .subtitle {
+    color: var(--muted); font-size: 13px; font-weight: 500;
+    letter-spacing: 2px; text-transform: uppercase; margin-bottom: 18px;
+  }
   .hero .tagline { color: var(--muted); font-size: 18px; max-width: 620px; margin: 0 auto 24px; }
   .hero .badges { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; margin-top: 20px; }
   .hero .badges a {
@@ -112,11 +119,11 @@
 </head>
 <body>
 <div class="hero">
-  <h1>bellamem</h1>
+  <img class="logo" src="brand/bella-logo.svg" alt="Bella"/>
+  <div class="subtitle">continuous hypergraph memory for AI agents</div>
   <div class="tagline">
-    Continuous hypergraph memory for AI agents. Concepts, not chats.
-    A local graph that accumulates mass on what gets ratified
-    and decays what doesn't.
+    Concepts, not chats. A local graph that accumulates mass on what
+    gets ratified and decays what doesn't.
   </div>
   <div class="install">pip install bellamem</div>
   <div class="badges">
