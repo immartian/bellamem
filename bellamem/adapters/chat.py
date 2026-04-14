@@ -194,6 +194,60 @@ _DEMONSTRATIVE_RE = re.compile(
     re.I,
 )
 
+# ---------------------------------------------------------------------------
+# Within-speaker retraction detection (session-narrative phase 1)
+# ---------------------------------------------------------------------------
+#
+# When a speaker reverses their own immediately prior turn, that's a
+# ⊥ dispute edge the graph currently misses. Canonical example:
+#
+#   T_n:   "All three SVGs fixed. Committing all three together."
+#   T_n+1: "Wait — the regen had side-effects I need to understand first."
+#
+# Retraction is RELATIONAL pragmatics — whether curr contradicts prev
+# depends on both turns together, not on any token in curr alone. That
+# makes it a poor fit for lexical gates: an English regex dies on
+# French content, and even within English the same word ("wait",
+# "actually") is sometimes a reversal marker and sometimes not.
+#
+# Structural answer: delegate to the LLM EW. The function is a thin
+# wrapper that takes an optional extractor handle and asks it to judge
+# the pair. No token lists, no per-language seeds, no stage-1 fast
+# path (that's where ad-hoc creeps back in under the name
+# "optimization"). If no extractor is available, return None — the
+# graph simply doesn't record retraction edges for that ingest.
+
+
+def classify_retraction(
+    prev_turn: str,
+    curr_turn: str,
+    llm_ew=None,
+) -> dict | None:
+    """Detect within-speaker retraction of the prior turn.
+
+    Returns ``{"type": "retract", "target": "prior", "confidence":
+    "low"|"medium"|"high"}`` when ``curr_turn`` reverses or supersedes
+    ``prev_turn``; ``None`` otherwise.
+
+    Phase 1 is adjacent same-speaker only — it does not cross gaps and
+    does not inspect speaker identity (the caller is expected to
+    invoke this only on same-speaker pairs).
+
+    Implementation: pure LLM delegation. ``llm_ew`` must expose a
+    ``pick_retraction(prev, curr) -> dict | None`` method (see
+    ``bellamem.adapters.llm_ew.LLMExtractor.pick_retraction``). If no
+    extractor is passed, the function returns ``None`` — there is no
+    lexical fallback, by design. See
+    ``tests/test_retraction_detection.py`` for the locked spec.
+    """
+    if not prev_turn or not curr_turn:
+        return None
+    if not prev_turn.strip() or not curr_turn.strip():
+        return None
+    if llm_ew is None:
+        return None
+    return llm_ew.pick_retraction(prev_turn, curr_turn)
+
 # Decision-anchor sentences for language-agnostic primary-claim scoring.
 # Used by the ratification path in adapters/claude_code.py to identify
 # which claim from a multi-claim assistant turn is the load-bearing

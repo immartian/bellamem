@@ -169,6 +169,58 @@ Rules:
 """
 
 
+_RETRACTION_SYSTEM = (
+    "You decide whether a speaker's current turn REVERSES or SUPERSEDES "
+    "the position taken in their own immediately prior turn. This is "
+    "retraction detection — catching moments where someone says 'actually "
+    "no, wait, on reflection let me do X instead' and thereby disputes "
+    "what they just committed to. Language-agnostic: judge by meaning, "
+    "not vocabulary. Return strict JSON."
+)
+
+_RETRACTION_USER_TEMPLATE = """Two consecutive turns from the SAME speaker.
+Decide whether the current turn RETRACTS (reverses, supersedes, or
+disputes) the prior turn's stated plan, claim, or decision.
+
+A retraction requires the current turn to actually contradict or
+supersede the prior — topic switches, elaborations, and neutral
+continuations are NOT retractions. Pauses like "wait for the build"
+(imperative) are NOT retractions. Emphasis like "actually, this is
+really useful" is NOT a retraction.
+
+Retraction examples:
+- prior: "Committing all three fixes now."
+  curr:  "Wait — the regen had side-effects I need to understand first."
+  → retract (curr stops the commit plan)
+- prior: "I'll use anchor embeddings."
+  curr:  "Actually, on reflection, anchors are still a hand-curated list. Let's do LLM instead."
+  → retract (curr switches the approach)
+
+NON-retraction examples:
+- prior: "I'll patch retry.py."
+  curr:  "Then I'll update bench.py."
+  → none (elaboration, not reversal)
+- prior: "The centroid measures topic similarity."
+  curr:  "Actually, it's a really useful finding."
+  → none ('actually' as emphasis, not reversal)
+
+Return: {{"type": "retract" | "none", "confidence": "low" | "medium" | "high"}}
+- Use "retract" only if the current turn genuinely reverses the prior.
+- Use "high" only when the reversal is unambiguous in any language.
+- Use "none" for all elaborations, pauses, topic switches, emphasis.
+
+Prior turn:
+\"\"\"
+{prev_turn}
+\"\"\"
+
+Current turn:
+\"\"\"
+{curr_turn}
+\"\"\"
+"""
+
+
 _SELF_USER_TEMPLATE = """Identify habitual self-observations in the text below.
 
 Extract statements like:
@@ -404,6 +456,48 @@ class LLMExtractor:
         if choice <= 0 or choice > len(candidates):
             return -1
         return choice - 1  # convert to 0-indexed
+
+    def pick_retraction(self, prev_turn: str,
+                        curr_turn: str) -> dict | None:
+        """Decide whether curr_turn retracts prev_turn (same speaker).
+
+        Returns a dict ``{"type": "retract", "target": "prior",
+        "confidence": <str>}`` on a positive detection, or ``None``
+        if the current turn is a neutral continuation, elaboration,
+        topic switch, or emphasis rather than a reversal.
+
+        Language-agnostic by the LLM's native semantics — no lexical
+        markers. Cache-first, keyed by md5(prev + '\\x00' + curr).
+        """
+        if not prev_turn or not curr_turn:
+            return None
+        p = prev_turn.strip()
+        c = curr_turn.strip()
+        if not p or not c:
+            return None
+        cache_text = f"{p[:2000]}\x00{c[:2000]}"
+        key = self._key("retraction", cache_text)
+        if key in self._cache:
+            entry = self._cache[key]
+        else:
+            user = _RETRACTION_USER_TEMPLATE.format(
+                prev_turn=p[:2000],
+                curr_turn=c[:2000],
+            )
+            try:
+                entry = self._call_json(_RETRACTION_SYSTEM, user)
+            except Exception:
+                return None
+            self._cache[key] = entry
+            self._mark_dirty()
+        if not isinstance(entry, dict):
+            return None
+        if entry.get("type") != "retract":
+            return None
+        conf = entry.get("confidence", "medium")
+        if conf not in ("low", "medium", "high"):
+            conf = "medium"
+        return {"type": "retract", "target": "prior", "confidence": conf}
 
     def find_self_observations(self, text: str) -> list[str]:
         """Return paraphrased self-observations. Cache-first."""
