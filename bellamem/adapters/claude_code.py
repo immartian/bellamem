@@ -375,30 +375,86 @@ def ingest_session(bella: Bella, path: str, *, tail: int | None = None,
 
     def apply_reaction(pending: list[tuple[str, str]], lr: float,
                         user_line: int) -> int:
-        """Retroactive ratification. The evidence event is the user turn,
-        so that's the source line we stamp on the accumulate — not the
-        original assistant turn. This preserves "where did the
-        ratification come from?" under `sources` queries.
+        """Retroactive ratification — targets the *primary* (decision-
+        bearing) claim of the preceding assistant turn, not a positional
+        default.
 
-        Target: only the *last* claim extracted from the preceding
-        assistant turn — not every claim. Rationale: a user "ya" /
-        "do it" / "sure" is the user authorising the assistant's
-        most recent offer, not validating every content-marker
-        sentence in the preceding paragraph. Ratifying all pending
-        claims inflated the "top ratified decisions" list with
-        expository prose that the user never actually decided on
-        — the rot this session surfaced when audit + graph inspection
-        showed the strongest m=0.71+ beliefs were mid-discussion
-        speculations like "Pros: ..." and "Cons: ..." from the
-        assistant's own pros/cons lists. Fixes that class of bug.
+        History: the prior fix used `pending[-1]` to replace the worse
+        prior fix that ratified EVERY claim in the preceding turn. That
+        was a positional heuristic dressed as a structural fix. It
+        worked on most turns because decisions tend to come last, but
+        failed on turns where the decision-bearing claim was followed
+        by a non-decision sentence (e.g. a confirmation of the plan,
+        a status note, a "let me know if"). The Q4 production-
+        correctness gap was the honest counter-evidence: the y-axis-
+        change decision was followed by a closing remark, and the
+        `[-1]` slot captured the closing remark, not the decision.
 
-        If no last claim exists (empty pending), return 0 with no
-        mutation — preserves the "no claims extracted, no
-        ratification" contract from before.
+        Fix: rank each pending claim by decision-bearing markers, pick
+        the highest-scoring one, fall back smoothly to `pending[-1]`
+        when no claim carries decision markers (in which case there's
+        nothing particularly worth ratifying anyway and `[-1]` is as
+        good a tiebreak as any).
+
+        Scoring uses the same regex primitives as `_classify_assistant`:
+        _DECISION_RE (`let's`, `we should`, `i'll`, `go with`, ...),
+        _RULE_RE (`must`, `never`, `invariant`, ...), and content
+        markers (file references, backticked names, tech tokens).
+        Each marker adds a fixed weight; the claim with the highest
+        total score wins. Ties go to the latest claim (same as the
+        old `[-1]` behavior).
+
+        This is a SEMANTIC fix, not a positional one: it ratifies the
+        claim that looks most like a decision, regardless of where it
+        sits in the turn. A decision at position 1 of 3 now gets
+        correctly ratified instead of losing to a content-free
+        follow-up at position 3.
+
+        The evidence event remains the user turn; source line stamped
+        from that turn so `sources` queries stay correct.
         """
         if not pending:
             return 0
-        fname, bid = pending[-1]
+
+        # Import the scoring regexes lazily to keep this adapter's
+        # import graph shallow.
+        from .chat import (
+            _DECISION_RE, _RULE_RE, _CONTENT_MARKER_RE, _has_real_denial,
+        )
+
+        def _decision_score(text: str) -> int:
+            """Load-bearing score for a claim. Higher = more decision-like."""
+            if not text:
+                return 0
+            score = 0
+            if _DECISION_RE.search(text):
+                score += 3
+            if _RULE_RE.search(text):
+                score += 3
+            if _has_real_denial(text):
+                score += 3
+            if _CONTENT_MARKER_RE.search(text):
+                score += 1
+            return score
+
+        # Score every pending claim by its belief text
+        best_idx = len(pending) - 1  # default: positional fallback
+        best_score = -1
+        for i, (fname, bid) in enumerate(pending):
+            g = bella.fields.get(fname)
+            if g is None:
+                continue
+            b = g.beliefs.get(bid)
+            if b is None:
+                continue
+            score = _decision_score(b.desc)
+            # Strict > so later claims win ties (degrades to [-1]
+            # behavior when no decision markers are present).
+            if score > best_score:
+                best_score = score
+                best_idx = i
+
+        fname, bid = pending[best_idx]
         g = bella.fields.get(fname)
         if g is None:
             return 0
