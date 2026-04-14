@@ -1,0 +1,380 @@
+"""Session ingest: read jsonl → per-turn classify → apply to graph.
+
+Public entry point is `ingest_session(graph, jsonl_path, ...)`. The
+per-turn application logic lives in `apply_classification` and is
+pure over (Graph, Source, ClassifyResult) so it's trivially testable.
+
+Runnable as `python -m bellamem.proto.ingest [snapshot_path]` for
+dogfooding against a session snapshot.
+"""
+from __future__ import annotations
+
+import json
+import sys
+import time
+from pathlib import Path
+from typing import Callable, Optional
+
+from bellamem.proto.clients import (
+    ClassifyResult, Embedder, TurnClassifier,
+)
+from bellamem.proto.graph import Graph
+from bellamem.proto.schema import (
+    Concept, ConceptClass, ConceptNature, Edge, Source, slugify_topic,
+)
+from bellamem.proto.store import load_graph, save_graph
+
+
+CONTEXT_K = 8
+RECENT_TURN_N = 3
+MAX_TURN_CHARS = 1500
+
+
+# ---------------------------------------------------------------------------
+# jsonl reading
+# ---------------------------------------------------------------------------
+
+def _extract_turn_text(msg: dict) -> str:
+    c = msg.get("message", {}).get("content")
+    if isinstance(c, str):
+        return c
+    if isinstance(c, list):
+        parts = []
+        for item in c:
+            if isinstance(item, dict) and item.get("type") == "text":
+                parts.append(item.get("text", ""))
+        return "\n".join(parts)
+    return ""
+
+
+def read_session_turns(jsonl_path: Path) -> list[Source]:
+    """Read a claude-code jsonl session and return Sources in order.
+
+    Skips tool-use notifications and bracketed system messages.
+    Each turn gets a 0-based turn_idx counted only among accepted
+    speaker turns (not raw file line numbers).
+    """
+    session_id = jsonl_path.stem[:8]
+    turns: list[Source] = []
+    idx = 0
+    for line in jsonl_path.read_text().splitlines():
+        try:
+            rec = json.loads(line)
+        except Exception:
+            continue
+        t = rec.get("type")
+        if t not in ("user", "assistant"):
+            continue
+        text = _extract_turn_text(rec).strip()
+        if not text:
+            continue
+        # Skip bracketed system messages (tool-use notifications etc.)
+        if text.startswith("<") and ">" in text[:120]:
+            continue
+        turns.append(Source(
+            session_id=session_id,
+            file_path=str(jsonl_path),
+            speaker=t,
+            turn_idx=idx,
+            text=text[:MAX_TURN_CHARS],
+        ))
+        idx += 1
+    return turns
+
+
+# ---------------------------------------------------------------------------
+# Context assembly + formatting
+# ---------------------------------------------------------------------------
+
+def _format_concepts(concepts: list[Concept]) -> str:
+    if not concepts:
+        return "(none)"
+    return "\n".join(
+        f'- id="{c.id}" topic="{c.topic}" class={c.class_} nature={c.nature}'
+        + (f" state={c.state}" if c.state else "")
+        for c in concepts
+    )
+
+
+def _format_turns(turns: list[Source]) -> str:
+    if not turns:
+        return "(none)"
+    lines = []
+    for t in turns:
+        snippet = t.text[:300].replace("\n", " ")
+        if len(t.text) > 300:
+            snippet += " …"
+        lines.append(f"T{t.turn_idx} [{t.speaker}]: {snippet}")
+    return "\n".join(lines)
+
+
+def assemble_context(
+    graph: Graph,
+    turn: Source,
+    recent: list[Source],
+    embedder: Embedder,
+) -> tuple[list[Concept], list[Concept], list[Source]]:
+    """Return (nearest, open_ephemerals_in_session, recent_turns)
+    for the classifier prompt. All three lists are bounded and cheap."""
+    if graph.concepts:
+        turn_emb = embedder.embed(turn.text[:600])
+        nearest = graph.nearest_concepts(turn_emb, k=CONTEXT_K)
+    else:
+        nearest = []
+    ephemerals = graph.open_ephemerals_in_session(turn.session_id)
+    return nearest, ephemerals, recent[-RECENT_TURN_N:]
+
+
+# ---------------------------------------------------------------------------
+# Apply classification result to graph
+# ---------------------------------------------------------------------------
+
+def apply_classification(
+    graph: Graph,
+    turn: Source,
+    result: ClassifyResult,
+    embedder: Embedder,
+) -> None:
+    """Apply the LLM's per-turn output to the graph.
+
+    Side effects:
+      - turn source is added (unconditional)
+      - cited concepts gain a source_ref and an edge from the turn
+      - state transitions fire on ephemerals via consume/retract edges
+      - new concepts are created (with cosine dedup against existing)
+      - concept→concept edges are added between existing concepts
+    """
+    graph.add_source(turn)
+
+    if result.act == "none":
+        return
+
+    # 1) Cites: turn→concept edges + source_ref updates
+    for cite in result.cites:
+        if not isinstance(cite, dict):
+            continue
+        cid = cite.get("concept_id") or cite.get("id")
+        if not cid or cid not in graph.concepts:
+            continue
+        c = graph.concepts[cid]
+        c.cite(turn.id)
+        edge_type = cite.get("edge") or cite.get("edge_type", "support")
+        try:
+            e = Edge(
+                type=edge_type,
+                source=turn.id,
+                target=cid,
+                established_at=turn.id,
+                voices=[turn.speaker],
+                confidence=cite.get("confidence", "medium"),
+            )
+        except ValueError:
+            continue  # bad edge type — skip rather than crash
+        graph.add_edge(e)
+        # State transitions on ephemerals
+        if c.class_ == "ephemeral":
+            if edge_type in ("consume-success", "consume-failure"):
+                c.state = "consumed"
+                graph.open_ephemerals.discard(c.id)
+            elif edge_type == "retract":
+                c.state = "retracted"
+                graph.open_ephemerals.discard(c.id)
+
+    # 2) Creates: new concepts with cosine dedup
+    for create in result.creates:
+        if not isinstance(create, dict):
+            continue
+        topic = (create.get("topic") or "").strip()
+        if not topic:
+            continue
+        class_: ConceptClass = create.get("class", "observation")  # type: ignore
+        nature: ConceptNature = create.get("nature", "factual")  # type: ignore
+        if class_ not in {"invariant", "decision", "observation", "ephemeral"}:
+            class_ = "observation"
+        if nature not in {"factual", "normative", "metaphysical"}:
+            nature = "factual"
+        parent = create.get("parent_hint")
+        if parent and parent not in graph.concepts:
+            parent = None
+
+        topic_emb = embedder.embed(topic)
+        existing = graph.find_similar_concept(topic, topic_emb)
+        if existing is not None:
+            existing.cite(turn.id)
+            # Optional: could upgrade class/nature if new classification is
+            # stronger, but that's a judgment call — defer for now.
+            continue
+
+        cid = slugify_topic(topic)
+        if cid in graph.concepts:
+            cid = f"{cid}-{len(graph.concepts)}"
+        try:
+            new_concept = Concept(
+                id=cid,
+                topic=topic,
+                class_=class_,
+                nature=nature,
+                parent=parent,
+                source_refs=[turn.id],
+                first_voiced_at=turn.id,
+                last_touched_at=turn.id,
+                embedding=topic_emb,
+            )
+        except ValueError:
+            continue
+        graph.add_concept(new_concept)
+
+    # 3) Concept→concept edges
+    for edge in result.concept_edges:
+        if not isinstance(edge, dict):
+            continue
+        src = edge.get("source")
+        tgt = edge.get("target")
+        etype = edge.get("type")
+        if not src or not tgt or not etype:
+            continue
+        if src not in graph.concepts or tgt not in graph.concepts:
+            continue
+        try:
+            e = Edge(
+                type=etype,
+                source=src,
+                target=tgt,
+                established_at=turn.id,
+                voices=[turn.speaker],
+                confidence=edge.get("confidence", "medium"),
+            )
+        except ValueError:
+            continue
+        graph.add_edge(e)
+
+
+# ---------------------------------------------------------------------------
+# Session ingest
+# ---------------------------------------------------------------------------
+
+def ingest_session(
+    graph: Graph,
+    jsonl_path: Path,
+    *,
+    embedder: Embedder,
+    classifier: TurnClassifier,
+    on_progress: Optional[Callable[[int, int, int, int], None]] = None,
+    save_every: int = 25,
+    save_to: Optional[Path] = None,
+) -> dict:
+    """Ingest every turn of a session jsonl into the graph.
+
+    Periodic cache flushes + optional intermediate graph saves so
+    long runs can be interrupted and resumed (next run hits cache).
+
+    Returns a stats dict.
+    """
+    turns = read_session_turns(jsonl_path)
+    processed: list[Source] = []
+    stats = {
+        "total_turns": len(turns),
+        "llm_calls": 0,
+        "cache_hits": 0,
+        "act_counts": {"walk": 0, "add": 0, "none": 0},
+        "started_at": time.time(),
+    }
+
+    for i, turn in enumerate(turns):
+        nearest, ephemerals, recent = assemble_context(
+            graph, turn, processed, embedder
+        )
+        context_ids = [c.id for c in nearest] + [c.id for c in ephemerals]
+        recent_ids = [s.id for s in recent]
+        result = classifier.classify(
+            turn_text=turn.text,
+            speaker=turn.speaker,
+            nearest_fmt=_format_concepts(nearest),
+            ephemerals_fmt=_format_concepts(ephemerals),
+            recent_fmt=_format_turns(recent),
+            context_ids=context_ids,
+            recent_ids=recent_ids,
+        )
+        if result.was_cached:
+            stats["cache_hits"] += 1
+        else:
+            stats["llm_calls"] += 1
+        stats["act_counts"][result.act] = stats["act_counts"].get(result.act, 0) + 1
+
+        apply_classification(graph, turn, result, embedder)
+        processed.append(turn)
+
+        if (i + 1) % save_every == 0:
+            embedder.save()
+            classifier.save()
+            if save_to is not None:
+                save_graph(graph, save_to)
+            if on_progress is not None:
+                on_progress(i + 1, len(graph.concepts), len(graph.edges), stats["llm_calls"])
+
+    embedder.save()
+    classifier.save()
+    stats["finished_at"] = time.time()
+    stats["elapsed_s"] = stats["finished_at"] - stats["started_at"]
+    return stats
+
+
+# ---------------------------------------------------------------------------
+# CLI entry point (for `python -m bellamem.proto.ingest SNAPSHOT_PATH`)
+# ---------------------------------------------------------------------------
+
+def main() -> int:
+    import tempfile
+    SCRATCH = Path(tempfile.gettempdir()) / "bellamem-proto-tree"
+    SCRATCH.mkdir(parents=True, exist_ok=True)
+
+    if len(sys.argv) >= 2:
+        snapshot = Path(sys.argv[1])
+    else:
+        snapshot = SCRATCH / "session-snapshot.jsonl"
+    if not snapshot.exists():
+        print(f"snapshot not found: {snapshot}", file=sys.stderr)
+        return 1
+
+    out_path = Path(".graph") / "v02.json"
+    embed_cache = SCRATCH / "proto-embed-cache.json"
+    llm_cache = SCRATCH / "proto-llm-cache.json"
+
+    embedder = Embedder(embed_cache)
+    classifier = TurnClassifier(llm_cache)
+    graph = load_graph(out_path)
+
+    print(f"input:  {snapshot}")
+    print(f"output: {out_path}")
+    print(f"initial graph: {len(graph.concepts)} concepts, {len(graph.edges)} edges")
+    print()
+
+    def progress(n_turns: int, n_concepts: int, n_edges: int, n_llm: int) -> None:
+        print(f"  [{n_turns}] concepts={n_concepts} edges={n_edges} llm={n_llm}", flush=True)
+
+    stats = ingest_session(
+        graph, snapshot,
+        embedder=embedder, classifier=classifier,
+        on_progress=progress, save_every=25, save_to=out_path,
+    )
+    save_graph(graph, out_path)
+
+    print()
+    print("=" * 60)
+    print("RESULT")
+    print("=" * 60)
+    print(f"turns:      {stats['total_turns']}")
+    print(f"llm calls:  {stats['llm_calls']}")
+    print(f"cache hits: {stats['cache_hits']}")
+    print(f"acts:       {stats['act_counts']}")
+    print(f"concepts:   {len(graph.concepts)}")
+    print(f"edges:      {len(graph.edges)}")
+    print(f"by_class:   { {k: len(v) for k, v in graph.by_class.items()} }")
+    print(f"by_nature:  { {k: len(v) for k, v in graph.by_nature.items()} }")
+    print(f"elapsed:    {stats['elapsed_s']:.1f}s")
+    print(f"output:     {out_path}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
