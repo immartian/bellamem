@@ -22,11 +22,12 @@ from bellamem.proto.graph import Graph
 from bellamem.proto.viz import Filters, VizPayload, build_payload, payload_to_dict
 
 
-Renderer = Literal["d3", "cytoscape"]
+Renderer = Literal["d3", "cytoscape", "3d"]
 
 _TEMPLATE_FILES: dict[Renderer, str] = {
     "d3": "viz_template_d3.html",
     "cytoscape": "viz_template_cytoscape.html",
+    "3d": "viz_template_3d.html",
 }
 
 # Payload placeholder injected by the template at build time. The
@@ -43,12 +44,28 @@ def render(
     renderer: Renderer = "d3",
     filters: Optional[Filters] = None,
 ) -> VizPayload:
-    """Build the payload, inline it into the chosen template, write the HTML."""
-    if renderer not in _TEMPLATE_FILES:
-        raise ValueError(f"unknown renderer {renderer!r} (expected d3 or cytoscape)")
+    """Build the payload, inline it into the chosen template, write the HTML.
 
-    payload = build_payload(graph, filters)
-    payload_dict = payload_to_dict(payload)
+    For `renderer == "3d"`, the payload additionally carries per-concept
+    `pos_3d` coordinates from UMAP × mass, and per-turn-hub `pos_3d`
+    placed at the centroid of its spokes. This requires `umap-learn`
+    (declared as the `[viz3d]` extra) and an Embedder cache.
+    """
+    if renderer not in _TEMPLATE_FILES:
+        raise ValueError(
+            f"unknown renderer {renderer!r} (expected d3 | cytoscape | 3d)"
+        )
+
+    if renderer == "3d":
+        from bellamem.proto.viz_3d import build_3d_payload
+        result = build_3d_payload(graph, filters=filters)
+        payload_dict = result.payload
+        # Rehydrate a VizPayload for the return signature (caller logs
+        # concept/edge counts from it).
+        payload = build_payload(graph, filters)
+    else:
+        payload = build_payload(graph, filters)
+        payload_dict = payload_to_dict(payload)
     payload_json = json.dumps(payload_dict, ensure_ascii=False, separators=(",", ":"))
 
     template_path = Path(__file__).parent / _TEMPLATE_FILES[renderer]

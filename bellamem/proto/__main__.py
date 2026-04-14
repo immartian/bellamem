@@ -140,8 +140,9 @@ def _viz_main(argv: list[str]) -> int:
              "Default: .graph/v02.html",
     )
     parser.add_argument(
-        "--renderer", choices=["d3", "cytoscape"], default="d3",
-        help="HTML renderer for .html output (default: d3)",
+        "--renderer", choices=["d3", "cytoscape", "3d"], default="d3",
+        help="HTML renderer for .html output: d3 (2D force-directed), "
+             "cytoscape (2D fcose), 3d (Three.js + UMAP × mass). Default: d3.",
     )
     parser.add_argument(
         "--min-mass", type=float, default=0.55,

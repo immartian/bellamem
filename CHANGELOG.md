@@ -4,6 +4,50 @@ All notable changes will be documented in this file. This project aims
 for [Semantic Versioning](https://semver.org). Until v1.0, everything
 is subject to change.
 
+## [0.2.3] — 2026-04-14 — 3D viz port to v0.2
+
+Closes Phase A of the VIZ_DESIGN spec — the Three.js 3D visualization
+now reads the v0.2 graph natively instead of the flat v0.1 schema.
+The legacy `bellamem/viz/render3d.py` stays in-tree as-is; the v0.2
+port lives in `bellamem/proto/viz_3d.py` alongside the 2D renderers.
+
+### New
+
+- **`python -m bellamem.proto viz --renderer 3d`** — third renderer
+  option alongside `d3` and `cytoscape`. Outputs a self-contained
+  Three.js HTML file with:
+  - UMAP × topic-embedding for X/Z clustering (semantically near
+    concepts land near each other in the scene)
+  - Mass for Y (ratified content rises above the floor plane)
+  - Class-per-shape: invariant=icosahedron, decision=tetrahedron,
+    observation=sphere, ephemeral=cube
+  - Nature-per-color: metaphysical=amber, normative=blue, factual=green
+  - Turn hubs placed at the centroid of their spoke concepts (hub
+    sits ~1.5 units below the concept cloud)
+  - Hover tooltips, click-to-sidebar, orbit camera, reset view,
+    toggle hubs/edges
+
+- **`bellamem/proto/viz_3d.py`** — new data-layer module that
+  reuses `viz.build_payload` for filter+hub work and extends the
+  payload dict with per-concept `pos_3d` triples. Re-embeds topic
+  text at render time using the existing `Embedder` cache; first
+  render against a fresh graph costs ~$0.01 of OpenAI calls for
+  400+ concepts, subsequent renders are instant.
+
+- **`bellamem/proto/viz_template_3d.html`** — new Three.js scene
+  template. Self-contained, imports Three.js r160 from CDN.
+  4 new tests in `tests/test_proto_viz_3d.py` covering position
+  assignment, Y-mass correspondence, turn-hub centroid placement,
+  and end-to-end HTML payload inlining.
+
+### Notes
+
+- Requires the `[viz3d]` extra (`umap-learn>=0.5`, already declared
+  in pyproject). Clean error message if missing.
+- Temporal replay (Phase B) and session filtering are still
+  deferred. The current 3D view is a static typed-structural
+  snapshot, same as the 2D renderers.
+
 ## [0.2.2] — 2026-04-14 — graph-health pass: rebuild-mass, prompt v2, audit layer
 
 A graph-quality session after 0.2.1 — three structural fixes landed
