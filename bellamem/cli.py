@@ -166,32 +166,54 @@ def cmd_expand(args: argparse.Namespace) -> int:
 
 
 def cmd_ask(args: argparse.Namespace) -> int:
-    """Session Q&A retriever — relevance-first pack.
+    """Session Q&A retriever — v0.2 walker over .graph/v02.json.
 
-    Complementary to `expand`. Same graph, same scoring primitives,
-    but the bucket priority is inverted: query-relevant beliefs rank
-    first, cross-session invariants land at the bottom as context.
-    Use `ask` for "what did we decide about X?" queries, and `expand`
-    for "what rules apply to this edit?" queries (the edit-guard path).
+    Replaces the flat-graph `bellamem.core.expand.ask` path, which
+    reads a snapshot (`default.json`) that `save` stopped updating
+    during the v0.2 migration. The walker scores concepts by
+    mass-weighted relevance (substring + cosine when embeddings
+    hydrate from cache) and walks one hop of typed edges
+    (dispute/retract/cause/support/elaborate) to show the
+    neighborhood.
 
-    See docs/production-correctness-results.md for the motivating
-    dogfood experiment.
+    Optional `--class` filter restricts seeds to one class — the
+    mechanism GitHub issue #2's §2 "intent classifier" can dispatch
+    through once it lands. Without the filter, ask returns all
+    classes mass-weighted.
     """
-    _setup_embedder()
-    snap = _resolve_snapshot(args.snapshot)
-    try:
-        bella = load(snap)
-    except EmbedderMismatch as e:
-        print(f"error: {e}", file=sys.stderr)
-        return 3
-    if not bella.fields:
-        print("empty memory — run `bellamem ingest-cc` first", file=sys.stderr)
+    from bellamem.proto import load_graph, ask_text
+    graph = load_graph()
+    if not graph.concepts:
+        print(
+            "empty v0.2 graph — run `bellamem save` first",
+            file=sys.stderr,
+        )
         return 1
-    pack = ask(bella, args.focus, budget_tokens=args.budget)
-    print(pack.text())
-    print()
-    print(f"— {len(pack.lines)} lines, ~{pack.used_tokens()}t / {args.budget}t budget "
-          f"(relevance-first) —")
+
+    # Optional embedder — cache-backed, same one ingest uses. When
+    # the cache file is missing or the OpenAI key is absent, the
+    # walker falls back to substring-on-topic scoring, which is
+    # actually fine for curated concept topics.
+    embedder = None
+    try:
+        import tempfile
+        from pathlib import Path
+        from bellamem.proto.clients import Embedder
+        scratch = Path(tempfile.gettempdir()) / "bellamem-proto-tree"
+        cache_path = scratch / "proto-embed-cache.json"
+        if cache_path.exists():
+            embedder = Embedder(cache_path)
+    except Exception:
+        embedder = None
+
+    class_filter = getattr(args, "class_filter", None)
+    text = ask_text(
+        graph,
+        args.focus,
+        embedder=embedder,
+        class_filter=class_filter,
+    )
+    print(text)
     return 0
 
 
@@ -563,40 +585,44 @@ def cmd_migrate(args: argparse.Namespace) -> int:
 
 
 def cmd_recall(args: argparse.Namespace) -> int:
-    """Session Q&A — alias for `bellamem ask` with the slash-command budget.
+    """Session Q&A — focus-scoped v0.2 walker pack.
 
-    `bellamem recall "what did we decide about auth?"` is identical to
-    `bellamem ask "what did we decide about auth?" -t 1500`. Routes
-    through ask (relevance-first) rather than expand (invariant-first)
-    because recall is semantically Q&A: "what was said about X" needs
-    query-relevant beliefs at the top, not cross-session invariants.
-
-    See docs/production-correctness-results.md for the empirical result
-    that drove this routing change: on 10 pre-registered session Q&A
-    questions, expand's top-3 rate was 0/10 while ask's was 4/10 by
-    substring and ~7/10 by semantic inspection.
+    Was parked on `cmd_resume` during the v0.2 migration because the
+    walker query API didn't exist yet and `resume_text` had no focus
+    filter. With `bellamem.proto.walker.ask_text` now live, recall
+    dispatches to the same v0.2 walker as `ask`, carrying the topic
+    through as the focus argument.
     """
-    # v0.2 alignment: route recall through cmd_resume (typed
-    # structural summary) instead of cmd_ask (flat-graph walker).
-    # The --topic arg is currently ignored in the v0.2 path because
-    # resume_text doesn't yet accept a focus filter — can be added
-    # when the walker query API lands.
-    return cmd_resume(args)
+    ask_args = argparse.Namespace(
+        snapshot=args.snapshot,
+        focus=args.topic,
+        budget=args.budget,
+        class_filter=getattr(args, "class_filter", None),
+    )
+    return cmd_ask(ask_args)
 
 
 def cmd_why(args: argparse.Namespace) -> int:
-    """Alias for `bellamem before-edit` with the slash-command default budget.
+    """Causal pack — v0.2 walker scoped to invariants + cause edges.
 
-    `bellamem why "the forgetting mechanism"` is identical to
-    `bellamem before-edit "the forgetting mechanism" -t 1500`.
+    Before v0.2, why routed to `cmd_before_edit` which reads the flat
+    `Bella` snapshot — stale since the v0.2 migration. Now dispatches
+    to the v0.2 walker with no class filter: the walker already
+    surfaces dispute/retract/cause/support/elaborate edges, and the
+    agent reading the pack can trace causal chains from the `⇒ causes`
+    section.
+
+    A tighter "only invariants + causes" mode can ship as a class
+    filter once issue #2's intent classifier lands — the schema
+    already types the data.
     """
-    why_args = argparse.Namespace(
+    ask_args = argparse.Namespace(
         snapshot=args.snapshot,
         focus=args.topic,
-        entity=None,
         budget=args.budget,
+        class_filter=getattr(args, "class_filter", None),
     )
-    return cmd_before_edit(why_args)
+    return cmd_ask(ask_args)
 
 
 def cmd_resume(args: argparse.Namespace) -> int:
