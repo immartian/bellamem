@@ -393,27 +393,40 @@ def cmd_bench(args: argparse.Namespace) -> int:
 
 
 def cmd_audit(args: argparse.Namespace) -> int:
-    _setup_embedder()
-    snap = _resolve_snapshot(args.snapshot)
-    try:
-        bella = load(snap)
-    except EmbedderMismatch as e:
-        print(f"error: {e}", file=sys.stderr)
-        return 3
-    if not bella.fields:
-        print("empty memory — run `bellamem ingest-cc` first", file=sys.stderr)
+    """Entropy + health report over .graph/v02.json.
+
+    Was reading the flat `Bella` snapshot (`default.json`), which
+    `save` stopped updating during the v0.2 migration — same shape
+    as the ask/recall/why retrieval gap. Rewired to
+    `bellamem.proto.audit.audit`, which computes v0.2-native
+    signals: concept_density, structural_edge_ratio,
+    mass_floor_fraction, mass_spread, orphan_refs, plus ephemeral
+    state counts.
+
+    Legacy args (--top, --max-per-section) are accepted but ignored
+    — the v0.2 audit has no top-N knob because each signal is a
+    single number, not a ranked list.
+    """
+    from bellamem.proto import load_graph
+    from bellamem.proto.audit import audit as audit_v02, format_audit
+
+    graph = load_graph()
+    if not graph.concepts:
+        print(
+            "empty v0.2 graph — run `bellamem save` first",
+            file=sys.stderr,
+        )
         return 1
-    report = audit(bella, top_n=args.top)
-    print(render_report(report, max_per_section=args.max_per_section))
-    # Default: audit is a diagnostic, not a linter. A successful run
-    # returns 0 whether or not entropy signals were found — the
-    # findings are in stdout. --strict opts into the old
-    # linter-style exit-4-on-signals behavior for CI pipelines.
-    # --no-exit-code is a backwards-compat no-op (it always produced
-    # exit 0, which is now the default).
-    if report.is_clean() or not args.strict:
-        return 0
-    return 4
+
+    report = audit_v02(graph)
+    print(format_audit(report))
+
+    # --strict keeps the old linter-style CI exit contract: non-zero
+    # when any signal is hard. Default stays diagnostic (exit 0 with
+    # findings in stdout) so dogfood workflows don't break.
+    if getattr(args, "strict", False) and report.any_hard():
+        return 4
+    return 0
 
 
 def cmd_emerge(args: argparse.Namespace) -> int:
