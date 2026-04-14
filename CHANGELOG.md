@@ -4,6 +4,41 @@ All notable changes will be documented in this file. This project aims
 for [Semantic Versioning](https://semver.org). Until v1.0, everything
 is subject to change.
 
+## [0.2.0] — 2026-04-14 — v0.2 stable: hot path + dynamics + interactive viz
+
+Promotes the v0.2 schema from alpha to stable after landing concept
+mass dynamics (R1), pattern emergence (R3), stale-state transition
+(R5), source-grounded timestamps, and an interactive hypergraph
+concept-map visualization in the browser.
+
+### What's new since a1
+
+- **BELLA R1 — concept mass via Jaynes accumulate.** New voice on a
+  concept bumps log-odds by a large delta; repeat voice by a small
+  one. Mass saturates at 1.0 via sigmoid, giving ratified content
+  a 4× visible lead over single-voice floor concepts.
+- **BELLA R3 — pattern emergence.** Recurring multi-source patterns
+  rise without hand-labeling.
+- **BELLA R5 — stale-state sweep.** `sweep_stale_ephemerals` flips
+  open ephemerals to `stale` after max-age with no re-voice,
+  unrooting abandoned plans from the open-work list.
+- **Source.timestamp** from jsonl contents — wall-clock is now
+  available for replay and the R5 age check.
+- **Interactive hypergraph concept-map viz** (`bellamem.proto viz`).
+  Two renderers — D3 v7 force-directed (draggable nodes) and
+  Cytoscape.js + fcose (auto-settling) — plus a static graphviz
+  SVG path for docs-embedding. Visual vocabulary: shape encodes
+  class (hexagon / diamond / ellipse / round-rect), fill color
+  encodes nature (amber / blue / green), node radius encodes mass,
+  border style encodes ephemeral state. Turn hubs materialize the
+  hypergraph: any turn that cites ≥N concepts becomes a visible
+  rosette linking its cited concepts. Turn-hub ground truth comes
+  from `concept.source_refs` (1280+ citations) not `graph.edges`
+  (670 typed Edges), closing a 33% coverage gap that would have
+  left high-mass concepts looking orphaned.
+- **Release hygiene**: `openai` + `numpy` moved from optional
+  extras to core deps for clean install.
+
 ## [0.2.0a1] — 2026-04-14 — v0.2 hot path: tree+cross-edges, class×nature, dogfooded
 
 First alpha of the v0.2 graph schema. The flat belief field from v0.1
