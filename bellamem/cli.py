@@ -1000,6 +1000,26 @@ def cmd_render(args: argparse.Namespace) -> int:
         print("empty memory — nothing to render", file=sys.stderr)
         return 1
 
+    # 3D viz path — `.html` output is a Three.js self-contained file,
+    # handled by bellamem.viz (optional, via the `viz3d` extra). It's
+    # its own layout (UMAP × mass) and ignores the focus/dispute/min-mass
+    # filters the graphviz path uses — those assume a 2D subgraph, not
+    # a 3D projection of the whole forest.
+    out_ext_early = os.path.splitext(args.out)[1].lower().lstrip(".")
+    if out_ext_early == "html":
+        try:
+            from .viz.render3d import render_html
+        except ImportError as e:
+            print(f"error: {e}", file=sys.stderr)
+            return 3
+        try:
+            n_rendered = render_html(bella, args.out)
+        except RuntimeError as e:
+            print(f"error: {e}", file=sys.stderr)
+            return 3
+        print(f"wrote 3D viz ({n_rendered} beliefs) → {args.out}")
+        return 0
+
     # Resolve the focus filter first so count_selected reports the final size.
     fids: set[str] | None = None
     if args.focus:

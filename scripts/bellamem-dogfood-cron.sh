@@ -41,8 +41,18 @@ if ! flock -n 9; then
     exit 0
 fi
 
-# Find the most recently modified session jsonl. If none, no-op.
-LATEST_SESSION="$(ls -1t "$CLAUDE_PROJECT_DIR"/*.jsonl 2>/dev/null | head -1 || true)"
+# Find the most recently modified session jsonl WITH actual speaker
+# content. An empty / metadata-only jsonl (e.g. a fresh session that
+# only ran `/bellamem` once) can win the mtime race against an
+# active session, causing the cron to ingest nothing. Filter by
+# "contains at least one user/assistant record" — cheap grep.
+LATEST_SESSION=""
+for f in $(ls -1t "$CLAUDE_PROJECT_DIR"/*.jsonl 2>/dev/null); do
+    if [ -f "$f" ] && grep -q '"type":"user"\|"type":"assistant"' "$f" 2>/dev/null; then
+        LATEST_SESSION="$f"
+        break
+    fi
+done
 
 {
     echo "--- [$(date -Is)] python -m bellamem.proto ingest ---"
