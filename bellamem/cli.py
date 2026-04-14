@@ -475,36 +475,46 @@ def cmd_emerge(args: argparse.Namespace) -> int:
 
 
 def cmd_replay(args: argparse.Namespace) -> int:
-    _setup_embedder()
-    snap = _resolve_snapshot(args.snapshot)
-    try:
-        bella = load(snap)
-    except EmbedderMismatch as e:
-        print(f"error: {e}", file=sys.stderr)
-        return 3
-    if not bella.fields:
-        print("empty memory — run `bellamem ingest-cc` first", file=sys.stderr)
+    """Chronological timeline — v0.2 walker over .graph/v02.json.
+
+    Replaces `bellamem.core.replay` (flat `Bella` snapshot, stale
+    since the v0.2 migration). Picks the most-recent-activity session
+    by default and prints each turn with the concepts it cited.
+
+    Legacy args (--focus, --since-line) are accepted but only
+    --since-line maps cleanly onto the v0.2 model (as since_turn);
+    --focus is ignored — the v0.2 replay is unfiltered by design
+    since `ask` already handles focus-scoped retrieval.
+    """
+    from bellamem.proto import load_graph, replay_text
+
+    graph = load_graph()
+    if not graph.sources:
+        print(
+            "empty v0.2 graph — run `bellamem save` first",
+            file=sys.stderr,
+        )
         return 1
-    from .adapters.claude_code import latest_session_key
-    result = replay(
-        bella,
-        focus=args.focus,
-        session=args.session or latest_session_key(),
-        since_line=args.since_line,
-        budget_tokens=args.budget,
-    )
-    if result.session_key is None:
-        print("no source-grounded beliefs yet — re-ingest to populate sources",
-              file=sys.stderr)
-        return 1
-    print(result.text())
-    print()
-    shown = len(result.entries)
-    total = result.total_candidates
-    suffix = ""
-    if shown < total:
-        suffix = f" (tail-preserved {shown}/{total}, budget={args.budget}t)"
-    print(f"— {shown} entries{suffix}, ~{result.used_tokens()}t —")
+
+    since_turn = 0
+    if getattr(args, "since_line", None):
+        try:
+            since_turn = int(args.since_line)
+        except (TypeError, ValueError):
+            since_turn = 0
+    # Soft cap: the flat replay used a token budget; v0.2 uses a line
+    # cap because each turn is ~1 line of summary. 120 matches the
+    # flat budget's typical output size at default 2500t.
+    max_lines = 120
+    if getattr(args, "budget", None):
+        max_lines = max(20, args.budget // 20)
+
+    print(replay_text(
+        graph,
+        session=getattr(args, "session", None),
+        since_turn=since_turn,
+        max_lines=max_lines,
+    ))
     return 0
 
 
