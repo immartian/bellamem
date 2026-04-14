@@ -31,9 +31,14 @@
     background: radial-gradient(ellipse at center, #1a2440 0%, #0b1220 60%);
     padding: 80px 24px 60px; text-align: center; border-bottom: 1px solid var(--panel2);
   }
+  .hero .logo-wrap {
+    display: inline-block; margin: 0 auto 20px;
+    background: #f8fafc; padding: 20px 36px; border-radius: 12px;
+    box-shadow: 0 8px 32px rgba(99, 102, 241, 0.25),
+                0 0 0 1px rgba(148, 163, 184, 0.15);
+  }
   .hero .logo {
-    display: block; margin: 0 auto 16px; max-width: 480px; width: 100%;
-    height: auto;
+    display: block; max-width: 440px; width: 100%; height: auto;
   }
   .hero .subtitle {
     color: var(--muted); font-size: 13px; font-weight: 500;
@@ -119,7 +124,9 @@
 </head>
 <body>
 <div class="hero">
-  <img class="logo" src="brand/bella-logo.svg" alt="Bella"/>
+  <div class="logo-wrap">
+    <img class="logo" src="brand/bella-logo.svg" alt="Bella"/>
+  </div>
   <div class="subtitle">continuous hypergraph memory for AI agents</div>
   <div class="tagline">
     Concepts, not chats. A local graph that accumulates mass on what
