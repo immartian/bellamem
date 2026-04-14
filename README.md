@@ -137,6 +137,46 @@ ratified decision (mass earned from two voices), a causal chain (the
 will block if the agent tries it again), and a self-observation about
 its own reasoning pattern.
 
+### The ontology
+
+Every concept in Bella is classified along two orthogonal axes. The
+axes aren't decorative — they drive retrieval, decay, and dispute
+handling differently. A normative decision about testing style doesn't
+decay the way an ephemeral observation about yesterday's build does.
+
+**Class** — where does it come from and how is it used?
+
+| class | shape | meaning |
+|---|---|---|
+| **invariant** | hexagon | time-invariant principles and facts — they don't decay |
+| **decision** | diamond | a commitment that constrains future action — revisable |
+| **observation** | ellipse | a single empirical record — a snapshot |
+| **ephemeral** | rounded square | pinned for short-term use, has an open→consumed/retracted/stale lifecycle |
+
+**Nature** — what kind of claim is this?
+
+| nature | color | meaning |
+|---|---|---|
+| **metaphysical** | amber | what the system IS — self-model, architectural facts |
+| **normative** | blue | what we commit to — rules, preferences, policies |
+| **factual** | green | measurable, checkable facts about the world |
+
+The 12 cells are a full typology — `invariant × metaphysical` is the
+deepest bedrock ("the graph is append-only"), `ephemeral × factual` is
+throwaway ("yesterday's CI was red"). Mass accumulates on every cell
+the same way (Jaynes log-odds from each ratifying voice), but the
+retrieval guard, the decay curve, and the dispute resolution read
+each cell differently.
+
+You can see the full ontology rendered live on your own graph:
+
+```bash
+python -m bellamem.proto viz              # .graph/v02.html (interactive)
+```
+
+Shape encodes class, color encodes nature, node size encodes
+mass, turn-hubs make the hypergraph structure visible as rosettes.
+
 ---
 
 ## Install
