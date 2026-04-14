@@ -141,6 +141,55 @@ def _relevance_rank(bella: "Bella", q_emb: list[float],
     return out
 
 
+def _relevance_rank_mass_weighted(
+    bella: "Bella", q_emb: list[float],
+    *, include_freshness: bool = True,
+) -> list[tuple[str, Belief, float]]:
+    """Like `_relevance_rank` but multiplies cosine by belief mass.
+
+    Used by `ask()`: under relevance-first retrieval, pure cosine
+    ranking promotes rejected bandaids that happen to share words
+    with the query (e.g. a denied "bump the webhook timeout" beats
+    a ratified "ack-first async" because it contains "webhook
+    timeout" verbatim). Weighting cosine by mass naturally demotes
+    disputed/low-mass beliefs and promotes ratified ones at similar
+    cosine.
+
+    Scoring:  score = (cosine(q, b) + freshness_bonus) × b.mass²
+
+    Where mass is in [0, 1] and base-mass unratified beliefs sit at
+    ~0.53. A denied belief drifts toward 0.40; a ratified belief
+    climbs toward 0.70-0.90. The squared multiplier spreads beliefs
+    by ~4× in score between "denied" and "ratified" (0.16 vs 0.56),
+    enough to overturn the ~0.05-0.10 cosine gaps that synthetic
+    scenarios sometimes produce between "high-cosine retro
+    observation" and "moderate-cosine ratified decision". Linear
+    (cosine × mass) was tried first and wasn't strong enough on the
+    sprint scenario — multi-voice decisions at m=0.75 were losing
+    to single-voice relevant observations at m=0.64 because the
+    1.17× mass ratio didn't close the cosine gap.
+
+    Squared is aggressive but capped: the mass-layer is still
+    separate (30% of budget) and handles cross-session invariants,
+    so this layer's mass boost can't promote a low-relevance
+    principle to the top of a specific query — it only lets
+    ratification status break ties among query-relevant beliefs.
+    """
+    now = time.time()
+    out: list[tuple[str, Belief, float]] = []
+    for fname, g in bella.fields.items():
+        for b in g.beliefs.values():
+            if not b.embedding:
+                continue
+            s = cosine(q_emb, b.embedding)
+            if include_freshness:
+                s += FRESHNESS_BONUS_MAX * _freshness_weight(b, now)
+            s *= b.mass ** 2
+            out.append((fname, b, s))
+    out.sort(key=lambda t: t[2], reverse=True)
+    return out
+
+
 def _disputes_touching(bella: "Bella", q_emb: list[float], min_sim: float = 0.2
                        ) -> list[tuple[str, Belief, float]]:
     out: list[tuple[str, Belief, float]] = []
@@ -329,12 +378,16 @@ def ask(bella: "Bella", focus: str, budget_tokens: int = 1200,
         quota_used[0] += cost
         return True
 
-    # 1) RELEVANCE layer — cosine to focus + freshness bonus. This is
-    # the primary layer for ask; it fills first and gets 60% of the
+    # 1) RELEVANCE layer — cosine × mass (weighted by belief mass so
+    # ratified decisions outrank denied bandaids at similar cosine).
+    # See _relevance_rank_mass_weighted for rationale; the short
+    # version is "pure cosine promotes rejected proposals that share
+    # query words, which is exactly the failure mode ask is meant to
+    # fix". This is the primary layer for ask and gets 60% of the
     # budget, so the top of the pack reflects what the user asked.
     rel_used = [0]
     if q_emb:
-        for fname, b, s in _relevance_rank(bella, q_emb):
+        for fname, b, s in _relevance_rank_mass_weighted(bella, q_emb):
             if s <= 0:
                 break
             try_add(fname, b, s, "relevant", rel_used, q_rel)

@@ -170,6 +170,92 @@ def test_compression_ratio_grows_with_scale(results):
     )
 
 
+def test_ask_mode_correctness_matches_or_beats_expand(tmp_path):
+    """Regression test: running scenarios through `ask` instead of
+    `expand` should produce correctness numbers at least as good as
+    expand on synthetic scenarios.
+
+    The production-correctness measurement (on real Claude Code
+    sessions) showed expand top-3 at 0/10 and ask top-3 at ~4-8/10.
+    That's the headline motivation. But synthetic scenarios pass
+    expand at 83% top-3 because the hand-authored decisions happen
+    to land in the mass layer. We need to verify ask doesn't
+    REGRESS the synthetic correctness — otherwise we'd be trading
+    production quality for synthetic quality.
+
+    This test rebuilds each scenario's graph, runs `ask()` instead
+    of `expand()`, and asserts the same correctness floors (every
+    correct answer in the pack, at least 50% per-scenario top-3,
+    aggregate ≥80%). If ask regresses below these floors on any
+    scenario, the bucket-order inversion has made the synthetic
+    case worse and the tradeoff needs revisiting.
+    """
+    import sys
+    from pathlib import Path
+    docs_dir = Path(__file__).resolve().parent.parent / "docs"
+    if str(docs_dir) not in sys.path:
+        sys.path.insert(0, str(docs_dir))
+    from scenarios import (  # type: ignore[import-not-found]
+        SCENARIOS, _ingest_dialogue, measure, age_beliefs, compress,
+        correctness_check,
+    )
+    from bellamem.core import Bella
+    from bellamem.core.embed import HashEmbedder, set_embedder
+    from bellamem.core.expand import ask
+
+    total_checked = 0
+    total_in_pack = 0
+    total_top_3 = 0
+
+    for scenario in SCENARIOS:
+        set_embedder(HashEmbedder())
+        bella = Bella()
+        tags = _ingest_dialogue(bella, scenario.dialogue)
+        age_beliefs(bella, days=60)
+        compress(bella)
+
+        # Run ASK instead of expand
+        pack = ask(bella, scenario.test_question,
+                   budget_tokens=scenario.expand_budget)
+
+        correctness = correctness_check(
+            bella, tags, scenario.correct_answer_tags,
+            scenario.dialogue, pack.text(),
+        )
+
+        # Every correct answer in the pack (same floor as expand)
+        in_pack_rate = correctness.n_in_pack / correctness.n_checked
+        assert in_pack_rate >= 1.0 - 1e-6, (
+            f"ask() on scenario {scenario.name!r} only surfaced "
+            f"{correctness.n_in_pack}/{correctness.n_checked} "
+            f"correct-answer beliefs (expected 100%). Missing: "
+            f"{[b.tag for b in correctness.beliefs if not b.in_pack]}"
+        )
+
+        # At least 50% per scenario in top-3 (same floor as expand)
+        top_3_rate = correctness.n_top_3 / correctness.n_checked
+        assert top_3_rate >= 0.5, (
+            f"ask() on scenario {scenario.name!r} placed only "
+            f"{correctness.n_top_3}/{correctness.n_checked} correct-"
+            f"answer beliefs in the top-3 ({100 * top_3_rate:.0f}%, "
+            f"floor 50%). Ranks: "
+            f"{[b.rank_in_pack for b in correctness.beliefs]}"
+        )
+
+        total_checked += correctness.n_checked
+        total_in_pack += correctness.n_in_pack
+        total_top_3 += correctness.n_top_3
+
+    # Aggregate floor (same as expand)
+    aggregate_top_3 = total_top_3 / total_checked if total_checked else 0
+    assert aggregate_top_3 >= 0.8, (
+        f"ask() aggregate top-3 rate dropped to {100 * aggregate_top_3:.0f}% "
+        f"({total_top_3}/{total_checked}); floor is 80%. The ask "
+        f"bucket-inversion has regressed the synthetic correctness "
+        f"case below what expand achieves."
+    )
+
+
 def test_correctness_all_answers_in_pack_most_in_top_3(results):
     """Correctness check — does the pack contain the RIGHT answer?
 

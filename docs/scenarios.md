@@ -33,7 +33,7 @@ Bella has two compression regimes that no single chart can cover:
 ### Chart 1 — small-scale, linear fit, break-even point
 
 Linear fit across 4 synthetic scenarios:
-`expand ≈ 106 + 0.51 × raw`. Break-even
+`expand ≈ 104 + 0.51 × raw`. Break-even
 at **~214 raw tokens**.
 
 ![compression curve — small scale](compression-curve.svg)
@@ -190,7 +190,7 @@ scenario is sized to show the token win empirically.
 | `flaky-test` | 184 | 11 → 7 | 3.45 → 2.79 | 233 | 0.8× | ✓ | ✓ |
 | `rejected-refactor` | 80 | 4 → 3 | 1.99 → 1.58 | 122 | 0.7× | ✓ | ✓ |
 | `long-debug` | 508 | 27 → 20 | 4.75 → 4.32 | 352 | 1.4× | ✓ | ✓ |
-| `sprint` | 1065 | 52 → 36 | 5.69 → 5.16 | 645 | 1.7× | ✓ | ✓ |
+| `sprint` | 1065 | 52 → 36 | 5.69 → 5.16 | 653 | 1.6× | ✓ | ✓ |
 
 ## What each column means
 
@@ -252,6 +252,6 @@ scenario is sized to show the token win empirically.
 - **After compression** (60d age + emerge + prune): 36 beliefs, entropy 5.16 bits (2 disputes, 2 causes, 6 multi-voice, 2 self-obs)
 - **Compression**: 16 beliefs removed (31% reduction), entropy dropped by 0.53 bits
 - **Structure preserved**: yes (every dispute, cause, ratification, and self-obs survived)
-- **expand pack**: 645 tokens, 21 lines — what a future agent sees when asking *"what did we learn about database performance and what's the plan"*
-- **Compression ratio**: 1.7× (raw / expand)
+- **expand pack**: 653 tokens, 21 lines — what a future agent sees when asking *"summarize the shipped database fixes and next sprint's schema plan"*
+- **Compression ratio**: 1.6× (raw / expand)
 - **Load-bearing claims surfaced**: yes — all of `['materialized', 'schema']` appear in the pack

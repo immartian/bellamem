@@ -544,19 +544,25 @@ def cmd_migrate(args: argparse.Namespace) -> int:
 
 
 def cmd_recall(args: argparse.Namespace) -> int:
-    """Alias for `bellamem expand` with the slash-command default budget.
+    """Session Q&A — alias for `bellamem ask` with the slash-command budget.
 
     `bellamem recall "what did we decide about auth?"` is identical to
-    `bellamem expand "what did we decide about auth?" -t 1500`. Exists
-    so the /bellamem slash command can call `bellamem recall` directly
-    without going through a shell dispatcher.
+    `bellamem ask "what did we decide about auth?" -t 1500`. Routes
+    through ask (relevance-first) rather than expand (invariant-first)
+    because recall is semantically Q&A: "what was said about X" needs
+    query-relevant beliefs at the top, not cross-session invariants.
+
+    See docs/production-correctness-results.md for the empirical result
+    that drove this routing change: on 10 pre-registered session Q&A
+    questions, expand's top-3 rate was 0/10 while ask's was 4/10 by
+    substring and ~7/10 by semantic inspection.
     """
     recall_args = argparse.Namespace(
         snapshot=args.snapshot,
         focus=args.topic,
         budget=args.budget,
     )
-    return cmd_expand(recall_args)
+    return cmd_ask(recall_args)
 
 
 def cmd_why(args: argparse.Namespace) -> int:
