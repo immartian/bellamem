@@ -140,6 +140,48 @@ class Graph:
                     break
         return out
 
+    def sweep_stale_ephemerals(
+        self,
+        *,
+        now_ts: Optional[float] = None,
+        max_age_days: float = 7.0,
+    ) -> int:
+        """R5 completion: flip open ephemerals to stale when untouched
+        beyond the age threshold.
+
+        An ephemeral plan that never gets consumed, retracted, or
+        re-voiced within max_age_days is assumed abandoned. This is
+        how the graph self-maintains its "open work" list —
+        ephemerals don't accumulate indefinitely.
+
+        Uses the timestamp of the concept's last_touched_at source,
+        comparing to `now_ts` (defaults to current wall-clock).
+        Source records without a timestamp are left alone (pre-
+        timestamp era is protected against silent mass-aging-out).
+
+        Returns the number of ephemerals transitioned to state=stale.
+        Does not delete concepts — a stale ephemeral stays in the
+        graph for audit purposes, just drops out of open_ephemerals.
+        """
+        import time as _time
+        if now_ts is None:
+            now_ts = _time.time()
+        max_age_sec = max_age_days * 86400.0
+
+        transitioned = 0
+        for c in list(self.concepts.values()):
+            if c.class_ != "ephemeral" or c.state != "open":
+                continue
+            src = self.sources.get(c.last_touched_at or "")
+            if src is None or src.timestamp is None:
+                continue
+            age_sec = now_ts - src.timestamp
+            if age_sec > max_age_sec:
+                c.state = "stale"
+                self.open_ephemerals.discard(c.id)
+                transitioned += 1
+        return transitioned
+
     # ------------------------------------------------------------------
     # Indices
     # ------------------------------------------------------------------

@@ -372,6 +372,14 @@ def ingest_session(
 
     embedder.save()
     classifier.save()
+
+    # R5 completion: age out ephemerals that never got consumed/
+    # retracted/re-voiced. Runs at the end of each ingest session
+    # so the "open work" list self-maintains without a separate
+    # maintenance command.
+    stale_count = graph.sweep_stale_ephemerals()
+    stats["stale_transitions"] = stale_count
+
     stats["finished_at"] = time.time()
     stats["elapsed_s"] = stats["finished_at"] - stats["started_at"]
     return stats

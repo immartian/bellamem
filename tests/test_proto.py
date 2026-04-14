@@ -186,6 +186,76 @@ def test_cite_dedups_source_ref_even_without_speaker():
     assert c.mass == m1
 
 
+def test_sweep_stale_ephemerals_transitions_old_open():
+    """R5: ephemeral whose last_touched_at source has a timestamp
+    older than max_age_days flips to state=stale."""
+    g = Graph()
+    # Old source: 10 days ago
+    old_src = Source(
+        session_id="s", file_path="x", speaker="user",
+        turn_idx=0, text="plan X", timestamp=1_000_000.0,
+    )
+    g.add_source(old_src)
+    c = Concept(
+        id="plan-x", topic="plan x",
+        class_="ephemeral", nature="normative",
+        embedding=np.random.rand(8).astype(np.float32),
+    )
+    c.cite(old_src.id, old_src.speaker)
+    g.add_concept(c)
+    assert c.state == "open"
+    assert "plan-x" in g.open_ephemerals
+
+    # now_ts 10 days after the source timestamp → should sweep
+    now_ts = old_src.timestamp + 10 * 86400
+    transitioned = g.sweep_stale_ephemerals(now_ts=now_ts, max_age_days=7.0)
+    assert transitioned == 1
+    assert c.state == "stale"
+    assert "plan-x" not in g.open_ephemerals
+
+def test_sweep_stale_ephemerals_leaves_recent_open():
+    g = Graph()
+    src = Source(
+        session_id="s", file_path="x", speaker="user",
+        turn_idx=0, text="recent plan", timestamp=1_000_000.0,
+    )
+    g.add_source(src)
+    c = Concept(
+        id="recent-plan", topic="recent plan",
+        class_="ephemeral", nature="normative",
+        embedding=np.random.rand(8).astype(np.float32),
+    )
+    c.cite(src.id, src.speaker)
+    g.add_concept(c)
+
+    # now_ts only 1 day later → should NOT sweep
+    now_ts = src.timestamp + 1 * 86400
+    assert g.sweep_stale_ephemerals(now_ts=now_ts, max_age_days=7.0) == 0
+    assert c.state == "open"
+    assert "recent-plan" in g.open_ephemerals
+
+def test_sweep_leaves_concepts_without_timestamps_alone():
+    """Pre-timestamp-era concepts (timestamp=None on their source)
+    should NOT get swept — that would mass-age-out historical graphs."""
+    g = Graph()
+    src = Source(
+        session_id="s", file_path="x", speaker="user",
+        turn_idx=0, text="legacy plan", timestamp=None,
+    )
+    g.add_source(src)
+    c = Concept(
+        id="legacy-plan", topic="legacy plan",
+        class_="ephemeral", nature="normative",
+        embedding=np.random.rand(8).astype(np.float32),
+    )
+    c.cite(src.id, src.speaker)
+    g.add_concept(c)
+
+    assert g.sweep_stale_ephemerals(now_ts=9_999_999_999.0,
+                                     max_age_days=1.0) == 0
+    assert c.state == "open"
+
+
 def test_add_edge_accumulates_voices():
     g = Graph()
     g.add_concept(_mk_concept("target"))
