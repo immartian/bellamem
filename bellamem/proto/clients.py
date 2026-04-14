@@ -20,7 +20,7 @@ from typing import Optional
 import numpy as np
 
 
-PROMPT_VERSION = "v1"
+PROMPT_VERSION = "v2"
 LLM_MODEL_DEFAULT = "gpt-4o-mini"
 EMBED_MODEL_DEFAULT = "text-embedding-3-small"
 
@@ -33,7 +33,8 @@ SYSTEM_PROMPT = """You watch a developer/AI conversation and maintain a project 
 
 For each new turn, decide what the turn does to the graph.
 
-A concept is identified by a short topic phrase (3-10 words) and classified on two axes:
+A concept is a distinct IDEA identified by a short topic phrase (3-10 words)
+and classified on two axes:
 
 class (temporal profile):
   - invariant: time-stable principles or structural facts; never expire
@@ -55,26 +56,64 @@ The context you receive:
 Output strict JSON with:
   - act: "walk" | "add" | "none"
     "walk" = turn reacts to existing concepts (ratification, dispute, consume, retract)
-    "add"  = turn introduces genuinely new standalone content
+    "add"  = turn introduces a genuinely new IDEA
     "none" = procedural (question, meta-authorization, acknowledgment, tool notification)
-  - cites: list of objects {"concept_id": "<id from nearest/ephemerals>", "edge": "<edge_type>"}
-    edge types: voice-cross | support | dispute | elaborate | cause | retract | consume-success | consume-failure
-  - creates: list of objects {"topic": "<3-8 word phrase>", "class": "<class>", "nature": "<nature>", "parent_hint": "<concept_id|null>"}
-    Only create concepts for genuinely new ideas. Prefer citing existing concepts.
-  - concept_edges: list of objects {"source": "<concept_id>", "target": "<concept_id>", "type": "<edge_type>", "confidence": "low|medium|high"}
-    Edges BETWEEN concepts (not between turn and concept — those go in cites).
 
-RULES:
+  - cites: list of {"concept_id": "<id from nearest/ephemerals>", "edge": "<edge_type>"}
+    These are TURN → concept edges (how this turn touched an existing concept).
+    edge types: voice-cross | support | dispute | retract | consume-success | consume-failure
+
+  - creates: list of {"topic": "<3-8 word phrase>", "class": "<class>", "nature": "<nature>", "parent_hint": "<concept_id|null>"}
+    Only create concepts for genuinely new IDEAS. Prefer citing existing concepts.
+
+  - concept_edges: list of {"source": "<concept_id>", "target": "<concept_id>", "type": "<edge_type>", "confidence": "low|medium|high"}
+    CONCEPT → concept structural relationships. First-class citizens — always
+    look for these when a turn relates two ideas.
+    edge types: cause | elaborate | dispute | support
+    Use these whenever the turn establishes a structural link between two concepts:
+      - cause:     "X because Y"       / "Y led to X"         / "the reason for X is Y"
+      - elaborate: "X is a case of Y"  / "X specializes Y"    / "X refines Y"
+      - dispute:   "X contradicts Y"   / "X is wrong, Y is right"
+      - support:   "X confirms Y"      / "X and Y agree"  (use sparingly — weakest signal)
+    Source and target must both be concept_ids, either from nearest_concepts
+    or from concepts you're creating in this same turn.
+
+ONE CONCEPT PER IDEA — do NOT split into attributes:
+  Bad:  creates=[{topic: "shape encoding for concept map"},
+                 {topic: "fill color encoding for concept map"},
+                 {topic: "label positioning for concept map"},
+                 {topic: "turn hubs representation"},
+                 {topic: "edges representation in concept map"}]
+  Good: creates=[{topic: "concept map visual vocabulary", class: "invariant", nature: "metaphysical"}]
+        (one node capturing the whole discussion; sub-attributes are prose in the turn text,
+         not separate concepts. Only split if each attribute will plausibly be cited again
+         independently later.)
+
+EXTRACTION RULES:
 - Questions → act=none
 - Meta-authorization ("do whatever", "sure go", "I trust your call") → act=none
-- Short acknowledgments ("thanks", "got it", "ok", "ya" alone) → act=walk with voice-cross IF the prior turn had a concrete proposal; otherwise act=none
-- Retraction markers ("wait — hold on", "actually on reflection", "scratch that") → act=walk with retract cite
+- Short acknowledgments ("thanks", "ok", "ya") → act=walk with voice-cross IF the prior
+  turn had a concrete proposal; otherwise act=none
+- Retraction markers ("wait — hold on", "scratch that", "actually on reflection")
+  → act=walk with retract cite
 - Tool notifications, shell output, task-notification blocks → act=none
-- Language-agnostic: classify by meaning, not keywords
-- Topic phrases should be noun-phrase form, concise, canonical, re-usable
-- Prefer merging near-variant topics into one — if a concept exists for "walker primitive", don't create "walker abstraction"
+
+CONCEPT HYGIENE:
+- Topic phrases: noun-phrase form, concise, canonical, re-usable across sessions
+- Prefer merging near-variant topics — if "walker primitive" exists, don't create
+  "walker abstraction", "walker protocol", "walker interface". Use the existing one.
+- Prefer zero creates over one create. Prefer one create over many.
 - When in doubt between walk and none, prefer none
-- Return ONLY valid JSON
+
+EDGE HYGIENE:
+- Don't default to "support" for cites. Support is the weakest edge and should be
+  rare — use voice-cross for neutral mention, or prefer a more informative edge type.
+- Always scan for cause / elaborate / dispute between the concepts you touch. Those
+  are the structural edges the graph actually needs.
+- concept_edges is first-class — populate it aggressively whenever two concepts
+  relate, not just as an afterthought.
+
+Return ONLY valid JSON.
 """
 
 USER_TEMPLATE = """### nearest_concepts

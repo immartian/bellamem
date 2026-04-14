@@ -42,10 +42,13 @@ class _DeterministicEmbedder(Embedder):
         self._client = None
 
     def embed(self, text: str) -> np.ndarray:
-        # 8-dim vector from sha256 bytes — same text always yields same vec
+        # Deterministic zero-centered vector — hash → bytes → [-1, 1].
+        # 32-dim (was 8) and zero-centered so unrelated topics have
+        # cosine near 0 instead of the ~0.75 noise floor you get with
+        # all-positive uint8-based vectors.
         import hashlib
         h = hashlib.sha256(text.encode()).digest()[:32]
-        v = np.frombuffer(h, dtype=np.uint8).astype(np.float32) / 255.0
+        v = (np.frombuffer(h, dtype=np.uint8).astype(np.float32) / 127.5) - 1.0
         return v
 
     def save(self) -> None:

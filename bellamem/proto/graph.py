@@ -17,7 +17,11 @@ from bellamem.proto.schema import (
 )
 
 
-DEDUP_COSINE = 0.85  # concept-merge threshold on topic embedding cosine
+# Concept-merge threshold on topic embedding cosine, checked at
+# ingest time by find_similar_concept(). Lowered from 0.85 after
+# the v0.2 diagnostic session showed DEDUP_COSINE was too strict
+# and let ~10% of the graph through as near-duplicates.
+DEDUP_COSINE = 0.78
 
 
 def _cosine(a: np.ndarray, b: np.ndarray) -> float:
