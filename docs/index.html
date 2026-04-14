@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>bellamem — continuous hypergraph memory for AI agents</title>
+<meta name="description" content="Local, accumulating hypergraph memory for LLM agents. Concepts, not chats. Open source, AGPL-3.0.">
+<meta property="og:title" content="bellamem — continuous hypergraph memory for AI agents">
+<meta property="og:description" content="Concepts, not chats. A local hypergraph that accumulates mass on what gets ratified and decays what doesn't.">
+<meta property="og:image" content="https://raw.githubusercontent.com/immartian/bellamem/master/docs/brand/bella-viz3d-poster.png">
+<style>
+  :root {
+    --bg: #0b1220;
+    --panel: #111827;
+    --panel2: #1f2937;
+    --text: #e5e7eb;
+    --muted: #9ca3af;
+    --accent: #a78bfa;
+    --invariant: #3b82f6;
+    --decision: #f97316;
+    --observation: #9ca3af;
+    --ephemeral: #22c55e;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    line-height: 1.6; font-size: 16px;
+  }
+  .hero {
+    background: radial-gradient(ellipse at center, #1a2440 0%, #0b1220 60%);
+    padding: 80px 24px 60px; text-align: center; border-bottom: 1px solid var(--panel2);
+  }
+  .hero h1 { margin: 0 0 8px 0; font-size: 42px; font-weight: 700; letter-spacing: -0.5px; }
+  .hero .tagline { color: var(--muted); font-size: 18px; max-width: 620px; margin: 0 auto 24px; }
+  .hero .badges { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; margin-top: 20px; }
+  .hero .badges a {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: var(--panel); border: 1px solid var(--panel2);
+    color: var(--text); padding: 8px 14px; border-radius: 6px;
+    text-decoration: none; font-size: 13px; transition: border-color 0.15s;
+  }
+  .hero .badges a:hover { border-color: var(--accent); }
+  .hero .install {
+    display: inline-block; background: #0f172a; border: 1px solid var(--panel2);
+    padding: 8px 14px; border-radius: 6px; font-family: ui-monospace, monospace;
+    font-size: 13px; color: #a5f3fc; margin-top: 24px;
+  }
+  main { max-width: 1100px; margin: 0 auto; padding: 48px 24px; }
+  section { margin-bottom: 56px; }
+  h2 {
+    font-size: 22px; font-weight: 600; margin: 0 0 20px 0;
+    padding-bottom: 10px; border-bottom: 1px solid var(--panel2);
+  }
+  h2 .sub { color: var(--muted); font-size: 13px; font-weight: 400; margin-left: 8px; }
+  .lede { color: var(--muted); max-width: 720px; margin-bottom: 20px; }
+  .viz-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 20px;
+  }
+  .viz-card {
+    background: var(--panel); border: 1px solid var(--panel2);
+    border-radius: 8px; padding: 20px; text-decoration: none; color: inherit;
+    transition: transform 0.15s, border-color 0.15s;
+    display: flex; flex-direction: column;
+  }
+  .viz-card:hover { transform: translateY(-2px); border-color: var(--accent); }
+  .viz-card h3 { margin: 0 0 6px 0; font-size: 16px; font-weight: 600; }
+  .viz-card .tag { font-size: 11px; color: var(--accent); text-transform: uppercase;
+                   letter-spacing: 1px; margin-bottom: 10px; }
+  .viz-card p { margin: 0; font-size: 13px; color: var(--muted); flex: 1; }
+  .viz-card .open-hint {
+    font-size: 11px; color: var(--muted); margin-top: 14px;
+    padding-top: 10px; border-top: 1px solid var(--panel2);
+  }
+  .viz-card .open-hint::after { content: " →"; color: var(--accent); }
+
+  .ontology-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 16px;
+  }
+  .ontology-cell {
+    background: var(--panel); border: 1px solid var(--panel2);
+    border-radius: 6px; padding: 16px; position: relative;
+    border-left-width: 4px;
+  }
+  .ontology-cell.invariant   { border-left-color: var(--invariant); }
+  .ontology-cell.decision    { border-left-color: var(--decision); }
+  .ontology-cell.observation { border-left-color: var(--observation); }
+  .ontology-cell.ephemeral   { border-left-color: var(--ephemeral); }
+  .ontology-cell h4 { margin: 0 0 4px 0; font-size: 14px; text-transform: capitalize; }
+  .ontology-cell .shape-hint { font-size: 11px; color: var(--muted); margin-bottom: 6px; }
+  .ontology-cell p { margin: 0; font-size: 12px; color: var(--muted); }
+
+  pre.code {
+    background: #0f172a; border: 1px solid var(--panel2); border-radius: 6px;
+    padding: 12px 14px; font-family: ui-monospace, monospace; font-size: 12px;
+    color: #a5f3fc; overflow-x: auto; margin: 0;
+  }
+  footer {
+    border-top: 1px solid var(--panel2); padding: 24px;
+    text-align: center; color: var(--muted); font-size: 12px;
+  }
+  footer a { color: var(--accent); }
+  .privacy-note {
+    background: rgba(245,158,11,0.08); border: 1px solid #b45309;
+    border-radius: 6px; padding: 12px 14px; font-size: 12px;
+    color: var(--muted); margin-top: 20px;
+  }
+  .privacy-note strong { color: #fbbf24; }
+</style>
+</head>
+<body>
+<div class="hero">
+  <h1>bellamem</h1>
+  <div class="tagline">
+    Continuous hypergraph memory for AI agents. Concepts, not chats.
+    A local graph that accumulates mass on what gets ratified
+    and decays what doesn't.
+  </div>
+  <div class="install">pip install bellamem</div>
+  <div class="badges">
+    <a href="https://github.com/immartian/bellamem">GitHub</a>
+    <a href="https://pypi.org/project/bellamem/">PyPI</a>
+    <a href="https://github.com/immartian/bellamem/blob/master/README.md">README</a>
+    <a href="https://github.com/immartian/bellamem/blob/master/CHANGELOG.md">Changelog</a>
+    <a href="https://github.com/immartian/bellamem/blob/master/LICENSE">AGPL-3.0</a>
+  </div>
+</div>
+
+<main>
+
+<section>
+<h2>Live concept map <span class="sub">click any viz to explore</span></h2>
+<p class="lede">
+  These are real bellamem self-graph renders — the graph the tool built of
+  its own development conversation, filtered to concepts with mass ≥ 0.7
+  (the ratified structural spine). Click a node for detail; drag, zoom,
+  and explore. Same underlying graph, three different renderers.
+</p>
+<div class="viz-grid">
+  <a class="viz-card" href="viz/v02-3d.html">
+    <div class="tag">Three.js · UMAP × mass</div>
+    <h3>3D concept map</h3>
+    <p>Topic embeddings cluster semantically along X/Z. Mass lifts ratified
+    content above the floor plane. Shape encodes class, color encodes nature.
+    Click any mesh for the full concept detail.</p>
+    <div class="open-hint">open 3D view</div>
+  </a>
+  <a class="viz-card" href="viz/v02-d3.html">
+    <div class="tag">D3 · force-directed</div>
+    <h3>2D force-directed</h3>
+    <p>d3-force physics with draggable nodes. Grab any concept and pull it
+    to untangle dense clusters. Edge labels show cause / elaborate / dispute
+    relationships.</p>
+    <div class="open-hint">open D3 view</div>
+  </a>
+  <a class="viz-card" href="viz/v02-cytoscape.html">
+    <div class="tag">Cytoscape · fcose</div>
+    <h3>2D cytoscape</h3>
+    <p>fcose force-directed with auto-settling layout, smooth animations,
+    and built-in wheel zoom. Cleaner default layout than D3 at the cost of
+    live drag.</p>
+    <div class="open-hint">open Cytoscape view</div>
+  </a>
+</div>
+<div class="privacy-note">
+  <strong>Note:</strong> these renders are filtered to <code>--min-mass 0.7</code>
+  with turn hubs disabled. Only the ratified structural spine is visible —
+  low-mass ephemerals and turn-preview text are excluded so nothing about
+  this project's internal conversations leaks beyond concept topics.
+</div>
+</section>
+
+<section>
+<h2>The ontology <span class="sub">every concept on two orthogonal axes</span></h2>
+<p class="lede">
+  The ontology isn't decorative. It drives retrieval, decay, and dispute
+  handling. A normative decision about testing style doesn't decay the way
+  an ephemeral observation about yesterday's build does.
+</p>
+<h3 style="font-size:14px; color:var(--muted); text-transform:uppercase; letter-spacing:1px; margin:20px 0 8px">class — where does it come from, how is it used</h3>
+<div class="ontology-grid">
+  <div class="ontology-cell invariant">
+    <h4>invariant</h4>
+    <div class="shape-hint">hexagon · doesn't decay</div>
+    <p>time-stable principles and structural facts about the system</p>
+  </div>
+  <div class="ontology-cell decision">
+    <h4>decision</h4>
+    <div class="shape-hint">diamond · revisable</div>
+    <p>commitments that constrain future action ("ship X before Y")</p>
+  </div>
+  <div class="ontology-cell observation">
+    <h4>observation</h4>
+    <div class="shape-hint">ellipse · snapshot</div>
+    <p>a single empirical record about current state</p>
+  </div>
+  <div class="ontology-cell ephemeral">
+    <h4>ephemeral</h4>
+    <div class="shape-hint">rounded square · open→consumed</div>
+    <p>pinned plans with an explicit state machine and decay</p>
+  </div>
+</div>
+<h3 style="font-size:14px; color:var(--muted); text-transform:uppercase; letter-spacing:1px; margin:20px 0 8px">nature — what kind of claim is this</h3>
+<div class="ontology-grid">
+  <div class="ontology-cell" style="border-left-color:#f59e0b">
+    <h4 style="color:#f59e0b">metaphysical</h4>
+    <div class="shape-hint">amber · what the system IS</div>
+    <p>self-model, architectural facts, load-bearing invariants</p>
+  </div>
+  <div class="ontology-cell" style="border-left-color:#3b82f6">
+    <h4 style="color:#3b82f6">normative</h4>
+    <div class="shape-hint">blue · what we commit to</div>
+    <p>rules, preferences, policies, code conventions</p>
+  </div>
+  <div class="ontology-cell" style="border-left-color:#10b981">
+    <h4 style="color:#10b981">factual</h4>
+    <div class="shape-hint">green · measurable</div>
+    <p>checkable facts about the world, benchmark results</p>
+  </div>
+</div>
+</section>
+
+<section>
+<h2>Try it locally <span class="sub">it's ~30 seconds to your first concept map</span></h2>
+<pre class="code">pip install 'bellamem[viz3d]'
+
+# Ingest a Claude Code session into your own graph
+python -m bellamem.proto ingest /path/to/session.jsonl
+
+# Open the concept map in your browser
+python -m bellamem.proto viz --out v02.html --renderer 3d
+xdg-open v02.html   # or `open v02.html` on macOS</pre>
+<p class="lede" style="margin-top:16px">
+  Full <a href="https://github.com/immartian/bellamem/blob/master/README.md" style="color:var(--accent)">README</a>
+  walks through the install, the class×nature ontology, the Before/After
+  comparison, and the compression results across 15 real Claude Code
+  projects.
+</p>
+</section>
+
+</main>
+
+<footer>
+  bellamem · AGPL-3.0 ·
+  <a href="https://github.com/immartian/bellamem">github.com/immartian/bellamem</a>
+</footer>
+</body>
+</html>

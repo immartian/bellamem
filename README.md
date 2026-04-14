@@ -373,16 +373,24 @@ structured retrieval preserves decisions. The two are complementary:
 
 ## See the graph
 
-A real Bella belief hypergraph — roughly 1,800 beliefs from a month
-of Claude Code sessions on Bella itself, across eight topical fields.
-Typed edges (`→` support, `⊥` rejected approach, `⇒` cause) and
-mass-weighted nodes are the structure that flat context can't preserve.
+Three live, clickable renders of Bella's own v0.2 concept graph —
+real data, filtered to `min_mass ≥ 0.7` so you see the ratified
+structural spine instead of noise:
 
-<a href="https://github.com/immartian/bellamem/raw/master/docs/bella-viz3d.webm">
-  <img src="https://raw.githubusercontent.com/immartian/bellamem/master/docs/brand/bella-viz3d-poster.png" alt="3D belief hypergraph visualization — click to play" width="720"/>
+- **[3D concept map](https://immartian.github.io/bellamem/viz/v02-3d.html)** — Three.js with UMAP × mass. Orbit, zoom, click any mesh.
+- **[2D force-directed (D3)](https://immartian.github.io/bellamem/viz/v02-d3.html)** — d3-force, draggable nodes.
+- **[2D force-directed (Cytoscape)](https://immartian.github.io/bellamem/viz/v02-cytoscape.html)** — cytoscape + fcose.
+
+Or visit the project page: **<https://immartian.github.io/bellamem/>**
+
+<a href="https://immartian.github.io/bellamem/viz/v02-3d.html">
+  <img src="https://raw.githubusercontent.com/immartian/bellamem/master/docs/brand/bella-viz3d-poster.png" alt="3D belief hypergraph visualization — click to open the live version" width="720"/>
 </a>
 
-*Click the image to play the .webm.*
+*Shape encodes class (hexagon/diamond/ellipse/cube), color encodes
+nature (amber/blue/green), node size encodes mass, and typed edges
+(`→` support, `⇒` cause, `…` elaborate, `⊥` dispute) are the
+structure that flat context can't preserve.*
 
 ---
 
