@@ -208,6 +208,45 @@ class Graph:
         for c in self.concepts.values():
             self._index_concept(c)
 
+    def rebuild_mass_from_source_refs(self) -> int:
+        """One-shot R1 repair: recompute concept.mass and voices by
+        replaying stored source_refs through cite().
+
+        Used when a graph was built by a pipeline that wrote
+        `source_refs` directly (e.g. legacy experiments/proto_tree.py
+        which doesn't have voices/mass/cite at all). Those concepts
+        load with mass=0.5 and voices=[] regardless of how many
+        speakers actually cited them, and `bellamem.proto.ingest`
+        can't repair them incrementally because `cite()` short-
+        circuits on `source_id in self.source_refs`.
+
+        This method resets each concept's voices/mass/first_voiced_at/
+        last_touched_at, then replays source_refs in order through
+        cite() using the speaker from graph.sources. Concepts whose
+        sources don't have a known speaker stay at the floor — that's
+        honest (we can't synthesize ratification that never happened).
+
+        Returns the number of concepts whose mass moved off the floor.
+        """
+        repaired = 0
+        for c in self.concepts.values():
+            stored_refs = list(c.source_refs)
+            if not stored_refs:
+                continue
+            # Reset the mass/voice state. Keep topic/class/nature/etc.
+            c.source_refs = []
+            c.voices = []
+            c.mass = 0.5
+            c.first_voiced_at = None
+            c.last_touched_at = None
+            for sr in stored_refs:
+                src = self.sources.get(sr)
+                speaker = src.speaker if src is not None else ""
+                c.cite(sr, speaker)
+            if c.mass > 0.501:
+                repaired += 1
+        return repaired
+
     # ------------------------------------------------------------------
     # JSON serialization
     # ------------------------------------------------------------------

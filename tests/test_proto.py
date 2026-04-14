@@ -186,6 +186,52 @@ def test_cite_dedups_source_ref_even_without_speaker():
     assert c.mass == m1
 
 
+def test_rebuild_mass_from_source_refs_repairs_frozen_concepts():
+    """Simulates a graph built by a pipeline that bypassed cite() —
+    concepts have source_refs but no voices and mass at the floor.
+    rebuild_mass_from_source_refs should replay the refs through
+    cite() and move concepts off the floor when multiple speakers
+    cited them. This is the legacy-proto_tree.py repair path."""
+    g = Graph()
+    g.add_source(Source(session_id="s", file_path="/f.jsonl",
+                        speaker="user", turn_idx=0, text="u0", timestamp=None))
+    g.add_source(Source(session_id="s", file_path="/f.jsonl",
+                        speaker="assistant", turn_idx=1, text="a1", timestamp=None))
+    g.add_source(Source(session_id="s", file_path="/f.jsonl",
+                        speaker="user", turn_idx=2, text="u2", timestamp=None))
+    # Frozen-by-design: source_refs set, voices empty, mass at floor.
+    frozen = Concept(id="frozen", topic="frozen thing",
+                     class_="invariant", nature="factual",
+                     mass=0.5, voices=[],
+                     source_refs=["s#0", "s#1", "s#2"])
+    g.add_concept(frozen)
+    assert g.concepts["frozen"].mass == 0.5
+    assert g.concepts["frozen"].voices == []
+
+    repaired = g.rebuild_mass_from_source_refs()
+    assert repaired == 1
+    c = g.concepts["frozen"]
+    assert c.mass > 0.6, f"mass should rise after 2 distinct voices, got {c.mass}"
+    assert set(c.voices) == {"user", "assistant"}
+    assert c.first_voiced_at == "s#0"
+    assert c.last_touched_at == "s#2"
+    assert c.source_refs == ["s#0", "s#1", "s#2"]
+
+
+def test_rebuild_mass_leaves_unknown_speaker_alone():
+    """source_ref pointing at a nonexistent source → cite() runs
+    but can't bump mass (no speaker). Concept stays at floor."""
+    g = Graph()
+    c = Concept(id="orphan", topic="orphan",
+                class_="observation", nature="factual",
+                mass=0.5, voices=[], source_refs=["missing#0"])
+    g.add_concept(c)
+    repaired = g.rebuild_mass_from_source_refs()
+    assert repaired == 0
+    assert g.concepts["orphan"].mass == 0.5
+    assert g.concepts["orphan"].voices == []
+
+
 def test_sweep_stale_ephemerals_transitions_old_open():
     """R5: ephemeral whose last_touched_at source has a timestamp
     older than max_age_days flips to state=stale."""

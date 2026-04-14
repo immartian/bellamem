@@ -29,9 +29,63 @@ def main() -> int:
         return resume_main()
     if cmd == "viz":
         return _viz_main(rest)
-    print(f"unknown subcommand: {cmd!r} (expected ingest | resume | viz)",
-          file=sys.stderr)
+    if cmd == "rebuild-mass":
+        return _rebuild_mass_main(rest)
+    print(
+        f"unknown subcommand: {cmd!r} (expected ingest | resume | viz | rebuild-mass)",
+        file=sys.stderr,
+    )
     return 2
+
+
+def _rebuild_mass_main(argv: list[str]) -> int:
+    """One-shot: replay source_refs through cite() to repair graphs
+    built by a pipeline that bypassed R1 (experiments/proto_tree.py).
+    Writes the repaired graph back atomically."""
+    import argparse
+    from pathlib import Path
+    from bellamem.proto.store import DEFAULT_GRAPH_PATH, load_graph, save_graph
+
+    parser = argparse.ArgumentParser(prog="bellamem.proto rebuild-mass")
+    parser.add_argument(
+        "--graph", type=Path, default=DEFAULT_GRAPH_PATH,
+        help="path to .graph/v02.json (default: ./.graph/v02.json)",
+    )
+    parser.add_argument(
+        "--dry-run", action="store_true",
+        help="compute the repair stats but don't save the graph back",
+    )
+    args = parser.parse_args(argv)
+
+    graph = load_graph(args.graph)
+    if not graph.concepts:
+        print(f"graph at {args.graph} is empty", file=sys.stderr)
+        return 1
+
+    before_floor = sum(1 for c in graph.concepts.values() if c.mass <= 0.501)
+    before_voices = sum(1 for c in graph.concepts.values() if len(c.voices) == 0)
+
+    repaired = graph.rebuild_mass_from_source_refs()
+
+    after_floor = sum(1 for c in graph.concepts.values() if c.mass <= 0.501)
+    after_voices = sum(1 for c in graph.concepts.values() if len(c.voices) == 0)
+    top = sorted(graph.concepts.values(), key=lambda c: -c.mass)[:5]
+
+    print(f"rebuild-mass on {args.graph}:")
+    print(f"  concepts moved off floor: {repaired}")
+    print(f"  at floor (m≤0.501): {before_floor} → {after_floor}")
+    print(f"  zero-voice concepts: {before_voices} → {after_voices}")
+    print(f"  top mass after repair:")
+    for c in top:
+        print(f"    m={c.mass:.3f}  v={len(c.voices)}  {c.topic[:50]}")
+
+    if args.dry_run:
+        print("  [dry-run] graph NOT saved")
+        return 0
+
+    save_graph(graph, args.graph)
+    print(f"  saved → {args.graph}")
+    return 0
 
 
 def _viz_main(argv: list[str]) -> int:
