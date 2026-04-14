@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 #
-# bellamem dogfood cron wrapper.
+# bellamem v0.2 dogfood cron wrapper.
 #
-# Runs `BELLAMEM_DECAY=on bellamem save` on the bellamem project itself
-# every N minutes, so decay + reinforcement run simultaneously against
-# the live forest. Designed for the v0.1.0 dogfood week: validates the
-# steady-state hypothesis from THEORY.md under real traffic.
+# Runs `python -m bellamem.proto ingest` on the bellamem project itself
+# every N minutes, incrementally ingesting new turns from the LATEST
+# Claude Code session jsonl into .graph/v02.json. Turns already in the
+# graph are skipped (see bellamem/proto/ingest.py:ingest_session), so
+# steady-state cost is bounded to new turns only.
 #
 # Install (from the repo root):
 #     ( crontab -l 2>/dev/null ; echo "*/5 * * * * $PWD/scripts/bellamem-dogfood-cron.sh" ) | crontab -
@@ -18,12 +19,15 @@
 #     crontab -l | grep -v bellamem-dogfood-cron | crontab -
 #
 # Lock: /tmp/bellamem-dogfood-cron.lock (flock, non-blocking — overlapping
-# ticks skip rather than queue, so the steady-state cost is bounded).
+# ticks skip rather than queue).
 
 set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-BELLAMEM="${PROJECT_DIR}/.venv/bin/bellamem"
+# Use the pipx venv's python — it has bellamem installed editable AND
+# has openai as a dependency (verified). The .venv may lack openai.
+PYTHON="/home/im3/.local/share/pipx/venvs/bellamem/bin/python"
+CLAUDE_PROJECT_DIR="/home/im3/.claude/projects/-media-im3-plus-labX-bellamem"
 LOG_DIR="${PROJECT_DIR}/.graph"
 LOG="${LOG_DIR}/dogfood-cron.log"
 LOCK="/tmp/bellamem-dogfood-cron.lock"
@@ -37,8 +41,17 @@ if ! flock -n 9; then
     exit 0
 fi
 
+# Find the most recently modified session jsonl. If none, no-op.
+LATEST_SESSION="$(ls -1t "$CLAUDE_PROJECT_DIR"/*.jsonl 2>/dev/null | head -1 || true)"
+
 {
-    echo "--- [$(date -Is)] BELLAMEM_DECAY=on bellamem save ---"
-    BELLAMEM_DECAY=on "$BELLAMEM" save 2>&1 || echo "[!] bellamem save exited $?"
+    echo "--- [$(date -Is)] python -m bellamem.proto ingest ---"
+    if [ -z "$LATEST_SESSION" ]; then
+        echo "[!] no session jsonl found in $CLAUDE_PROJECT_DIR"
+    else
+        echo "session: $(basename "$LATEST_SESSION")"
+        "$PYTHON" -m bellamem.proto ingest "$LATEST_SESSION" 2>&1 \
+            || echo "[!] ingest exited $?"
+    fi
     echo "--- done ---"
 } >> "$LOG" 2>&1

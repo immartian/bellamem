@@ -277,11 +277,21 @@ def ingest_session(
         "total_turns": len(turns),
         "llm_calls": 0,
         "cache_hits": 0,
+        "skipped_already_ingested": 0,
         "act_counts": {"walk": 0, "add": 0, "none": 0},
         "started_at": time.time(),
     }
 
     for i, turn in enumerate(turns):
+        # Incremental ingest: skip turns already processed in a prior
+        # run. Safe because sources are append-only — once a turn is
+        # ingested its effect on the graph is fixed. This makes the
+        # cron cheap: re-running on the same session only processes
+        # newly-appended turns.
+        if turn.id in graph.sources:
+            stats["skipped_already_ingested"] += 1
+            processed.append(turn)
+            continue
         nearest, ephemerals, recent = assemble_context(
             graph, turn, processed, embedder
         )

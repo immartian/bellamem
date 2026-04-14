@@ -581,68 +581,30 @@ def cmd_why(args: argparse.Namespace) -> int:
 
 
 def cmd_resume(args: argparse.Namespace) -> int:
-    """Composite working-memory pack for session start.
+    """Session start pack — v0.2-native typed structural summary.
 
-    Prints three sections to stdout:
-      1. Working memory — replay tail of the most recent session
-      2. Long-term memory — expand pack over the focus
-      3. Signal — top surprises
+    Reads .graph/v02.json and prints the resume text from
+    bellamem.proto.resume_text, which organizes concepts by class ×
+    nature and surfaces open ephemerals, retracted approaches, and
+    dispute edges. Replaces the flat-graph replay/expand/surprises
+    sections which lost the epistemic structure in narrative prose.
 
-    Replaces the shell dispatcher's `resume` subcommand. The section
-    headers match what the slash command post-processing expects.
+    Legacy args (--focus, --replay-budget, --expand-budget,
+    --surprise-top) are accepted but ignored — the v0.2 resume uses
+    its own section caps. Kept for CLI compatibility; can be removed
+    in a follow-up once callers stop passing them.
     """
-    _setup_embedder()
-    snap = _resolve_snapshot(args.snapshot)
-    try:
-        bella = load(snap)
-    except EmbedderMismatch as e:
-        print(f"error: {e}", file=sys.stderr)
-        return 3
-    if not bella.fields:
-        print("empty memory — run `bellamem save` or `bellamem ingest-cc` first",
-              file=sys.stderr)
+    from bellamem.proto import load_graph, resume_text
+
+    graph = load_graph()
+    if not graph.concepts:
+        print(
+            "empty v0.2 graph — run `bellamem save` or "
+            "`python -m bellamem.proto ingest <SESSION>` first",
+            file=sys.stderr,
+        )
         return 1
-
-    # Section 1: working memory (replay tail)
-    print("## Working memory (replay tail)")
-    print()
-    # Pin replay to the current project's latest transcript so a
-    # cross-project jsonl source already in the graph (ingested from
-    # a subfolder Claude Code session) can't win the picker.
-    from .adapters.claude_code import latest_session_key
-    replay_result = replay(
-        bella,
-        focus=None,
-        session=latest_session_key(),
-        since_line=None,
-        budget_tokens=args.replay_budget,
-    )
-    if replay_result.session_key is None:
-        print("(no source-grounded beliefs yet — re-ingest to populate sources)")
-    else:
-        print(replay_result.text())
-        print()
-        shown = len(replay_result.entries)
-        total = replay_result.total_candidates
-        suffix = ""
-        if shown < total:
-            suffix = f" (tail-preserved {shown}/{total}, budget={args.replay_budget}t)"
-        print(f"— {shown} entries{suffix}, ~{replay_result.used_tokens()}t —")
-
-    print()
-    print("## Long-term memory (ratified decisions, current focus)")
-    print()
-    pack = expand(bella, args.focus, budget_tokens=args.expand_budget)
-    print(pack.text())
-    print()
-    print(f"— {len(pack.lines)} lines, ~{pack.used_tokens()}t / {args.expand_budget}t budget —")
-
-    print()
-    print("## What just mattered (surprises)")
-    print()
-    report = compute_surprises(bella, top_n=args.surprise_top)
-    print(render_surprise_report(report, max_per_section=args.surprise_top))
-
+    print(resume_text(graph))
     return 0
 
 
@@ -654,129 +616,85 @@ def cmd_save(args: argparse.Namespace) -> int:
     then prints an audit report and top surprises in the same
     section layout the slash command expects.
     """
-    from .adapters.claude_code import ingest_project
+    # v0.2-native save: incrementally ingest the latest Claude Code
+    # session into .graph/v02.json via bellamem.proto. Audit / emerge /
+    # decay / surprises are flat-graph concerns that have no v0.2
+    # equivalent yet — deferred to follow-up work. Legacy args
+    # (--snapshot, --no-emerge, --audit-top, --surprise-top,
+    # --all-sessions, --no-llm, --tail, --force-audit) are accepted
+    # for CLI compatibility but mostly ignored.
+    from pathlib import Path
+    from bellamem.proto import load_graph, save_graph, ingest_session
+    from bellamem.proto.clients import Embedder, TurnClassifier
+    from bellamem.proto.store import DEFAULT_GRAPH_PATH
+    import tempfile
 
-    _setup_embedder()
-    snap = _resolve_snapshot(args.snapshot)
-    try:
-        bella = load(snap)
-    except EmbedderMismatch as e:
-        print(f"error: {e}", file=sys.stderr)
-        return 3
-
-    # Section 1: ingest with auto-consolidation
-    print("## Ingest with auto-consolidation")
-    print()
-    before = sum(len(g.beliefs) for g in bella.fields.values())
-
-    # Default is "current session only" (the mtime-latest transcript).
-    # --all-sessions flips to the old "every transcript" behaviour.
-    latest_only = not args.all_sessions
-
-    # Stream per-session results + per-session start + intra-file
-    # progress every N turns so the user sees continuous activity
-    # instead of staring at the section header for ten minutes.
-    results: list[dict] = []
-    for r in ingest_project(
-        bella,
-        cwd=args.cwd,
-        tail=args.tail,
-        no_llm=args.no_llm,
-        latest_only=latest_only,
-        on_session_start=_print_session_start,
-        on_progress=_print_session_progress,
-    ):
-        results.append(r)
-        print(_format_session_result(r))
-
-    after_ingest = sum(len(g.beliefs) for g in bella.fields.values())
-    ingested = after_ingest - before
-
-    merged = 0
-    if not args.no_emerge and ingested > 0:
-        emerge_report = emerge(bella)
-        merged = len(emerge_report.merges)
-
-    # Optional log-odds decay, gated on BELLAMEM_DECAY=on. Runs *after*
-    # emerge so it operates on post-merge beliefs and *before* save so
-    # the persisted snapshot reflects the decayed state. No-op when the
-    # env var is unset or "off" — default-off is intentional for v0.1.0a
-    # until a week of dogfood makes it the default in v0.1.0.
-    decay_report = None
-    if os.environ.get("BELLAMEM_DECAY", "").lower() == "on":
-        import time as _time
-        from .core.decay import apply_decay, DEFAULT_HALF_LIFE_DAYS
-        _now = _time.time()
-        _dt = _now - bella.decayed_at
-        try:
-            _hl = float(os.environ.get("BELLAMEM_DECAY_HALF_LIFE_DAYS",
-                                       DEFAULT_HALF_LIFE_DAYS))
-        except ValueError:
-            _hl = DEFAULT_HALF_LIFE_DAYS
-        decay_report = apply_decay(bella, _dt, _hl)
-        bella.decayed_at = _now
-
-    save(bella, snap)
-    after = sum(len(g.beliefs) for g in bella.fields.values())
-
-    # Bound the embed cache to live beliefs. Without this, every query
-    # embedding (expand, recall, surprise, emerge) leaks into the cache
-    # forever and RSS grows with session activity instead of belief
-    # count. Structural prune, same philosophy as bellamem prune — the
-    # forest is the source of truth; anything not anchored to it is
-    # noise. See project_prune_decision.md.
-    from .core.embed import prune_embedder
-    live_texts = [b.desc for g in bella.fields.values()
-                  for b in g.beliefs.values()]
-    dropped = prune_embedder(live_texts)
-    if dropped:
-        print(f"embed cache: pruned {dropped} stale entries")
-
-    if not results:
-        print(f"no Claude Code transcripts found for cwd={args.cwd or os.getcwd()}")
+    # Find latest session jsonl. The claude-code projects dir encodes
+    # the cwd in its name — we walk the conventional location.
+    cwd = Path(args.cwd or os.getcwd()).resolve()
+    claude_dir_name = "-" + str(cwd).replace("/", "-").lstrip("-")
+    claude_project_dir = (
+        Path.home() / ".claude" / "projects" / claude_dir_name
+    )
+    if not claude_project_dir.is_dir():
+        print(
+            f"no Claude Code project dir found for {cwd}\n"
+            f"  expected: {claude_project_dir}",
+            file=sys.stderr,
+        )
         return 1
 
-    # Short-circuit the expensive audit + surprises phases when ingest
-    # produced no new data. A "save" run on an unchanged graph should
-    # not spend minutes recomputing an audit whose output is identical
-    # to the previous save's. The snapshot gets written regardless so
-    # any cursor updates still persist. Pass `--force-audit` if you
-    # explicitly want the full audit+surprises report on an unchanged
-    # graph (e.g. to re-check entropy signals without adding content).
-    if ingested == 0 and merged == 0 and not getattr(args, "force_audit", False):
-        if decay_report is not None:
-            print(f"decay (auto): {decay_report.brief()}")
-        print(f"beliefs: {after} (no new content since last save)")
-        print(f"snapshot: {snap}")
-        print()
-        print("nothing new to audit — `bellamem save --force-audit` to re-run "
-              "audit + surprises anyway.")
-        return 0
-
-    if merged:
-        print(f"emerge (auto): merged {merged} near-duplicate pair(s)")
-    if decay_report is not None:
-        print(f"decay (auto): {decay_report.brief()}")
-    print(
-        f"beliefs: {before} → {after_ingest} → {after}"
-        f"  (+{ingested} ingested, -{after_ingest - after} merged)"
+    jsonls = sorted(
+        claude_project_dir.glob("*.jsonl"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
     )
-    print(f"snapshot: {snap}")
+    if not jsonls:
+        print(f"no session jsonls in {claude_project_dir}", file=sys.stderr)
+        return 1
+    latest = jsonls[0]
 
-    # Section 2: audit
+    print("## Ingest with auto-consolidation")
     print()
-    print("## Audit")
-    print()
-    audit_report = audit(bella, top_n=args.audit_top)
-    print(render_report(audit_report, max_per_section=args.audit_max_per_section))
+    print(f"session: {latest.name}")
 
-    # Section 3: top surprises after ingest
-    print()
-    print("## Top surprises after ingest")
-    print()
-    surprise_report = compute_surprises(bella, top_n=args.surprise_top)
-    print(render_surprise_report(surprise_report, max_per_section=args.surprise_top))
+    scratch = Path(tempfile.gettempdir()) / "bellamem-proto-tree"
+    scratch.mkdir(parents=True, exist_ok=True)
+    embedder = Embedder(scratch / "proto-embed-cache.json")
+    classifier = TurnClassifier(scratch / "proto-llm-cache.json")
 
+    graph_path = Path(args.snapshot) if args.snapshot else DEFAULT_GRAPH_PATH
+    graph = load_graph(graph_path)
+    before_concepts = len(graph.concepts)
+    before_edges = len(graph.edges)
+
+    def _progress(n_turns, n_concepts, n_edges, n_llm):
+        print(f"  [{n_turns}] concepts={n_concepts} edges={n_edges} llm={n_llm}",
+              flush=True)
+
+    stats = ingest_session(
+        graph, latest,
+        embedder=embedder, classifier=classifier,
+        on_progress=_progress, save_every=25, save_to=graph_path,
+    )
+    save_graph(graph, graph_path)
+
+    delta_concepts = len(graph.concepts) - before_concepts
+    delta_edges = len(graph.edges) - before_edges
+    print()
+    print(
+        f"concepts: {before_concepts} → {len(graph.concepts)} "
+        f"(+{delta_concepts})  "
+        f"edges: {before_edges} → {len(graph.edges)} (+{delta_edges})"
+    )
+    print(
+        f"turns: {stats['total_turns']}  "
+        f"llm: {stats['llm_calls']}  "
+        f"cached: {stats['cache_hits']}  "
+        f"skipped: {stats.get('skipped_already_ingested', 0)}"
+    )
+    print(f"acts: {stats['act_counts']}")
+    print(f"snapshot: {graph_path}")
     return 0
 
 

@@ -1,31 +1,31 @@
-"""bellamem PreToolUse guard — the hot path between Claude Code and the graph.
+"""bellamem PreToolUse guard — v0.2 hot path between Claude Code and the graph.
 
 Registered as a console-script (`bellamem-guard` in pyproject.toml) so
 Claude Code can invoke it as a PreToolUse hook. Two jobs:
 
-  1. ADVISORY — emit a context pack before the edit runs. The model
-     sees it as `additionalContext` (system reminder) alongside the
-     tool invocation. Pack content: `__self__` anti-patterns, top
-     ratified invariants, top ⊥ disputes — mass-ranked, no focus query.
+  1. ADVISORY — emit a v0.2-native typed context pack before the edit
+     runs. The model sees it as `additionalContext` (system reminder)
+     alongside the tool invocation. Sections (epistemic priority):
+     invariant × metaphysical, invariant × normative, open ephemerals,
+     retracted approaches, dispute edges.
 
   2. BLOCKING — if the intended edit text substring-matches a
-     high-mass ⊥ dispute description, exit 2 with a reason. Claude
-     Code treats exit 2 as "refuse the tool call, surface the stderr
-     reason to the model." Rejected approaches become literally
-     unreachable, not just discouraged. This is the feature that
-     `is_reserved_field` does at the core level — the guard is its
-     generalisation to any belief in the graph.
+     retracted ephemeral's topic OR a dispute edge's target concept,
+     exit 2 with a reason. Claude Code treats exit 2 as "refuse the
+     tool call, surface the stderr reason to the model." Rejected
+     approaches become literally unreachable, not just discouraged.
+
+v0.2 only, no fallback. If `.graph/v02.json` doesn't exist for the
+current project, the guard silently no-ops (exit 0, empty stdout).
+Run `python -m bellamem.proto ingest` to populate the graph first.
 
 The guard must feel instant. To hit that budget:
-  - stdlib only at module import time (no openai, no numpy, no umap)
-  - loads graph.json via `load_graph_only` (no embeddings, no embed
-    cache, no embedder signature check)
-  - no focus-string embedding (so no network round-trip)
-  - substring match on disputes (not semantic) — fast and obvious
+  - stdlib only at import time (no openai, no numpy, no bellamem.core)
+  - JSON parse of .graph/v02.json (~562 KB for the dogfood graph)
+  - no focus-string embedding (no network)
+  - substring match on retracted/dispute topics (not semantic)
 
-Target latency: under 500 ms total (bellamem startup + graph load +
-pack build + output). Measured ~160 ms for graph load alone on the
-real 1792-belief dogfood forest.
+Target latency: under 300 ms total.
 
 Output contract (exit 0):
   JSON on stdout in the shape Claude Code expects:
@@ -37,15 +37,13 @@ Output contract (exit 0):
     }
 
 Output contract (exit 2 = block):
-  Human-readable reason on stderr, empty stdout. Claude Code surfaces
-  the stderr message to the model, which then must either justify
-  itself or pick a different approach.
+  Human-readable reason on stderr, empty stdout.
 
 Silent no-op (exit 0 with empty stdout) on any of:
-  - missing `.graph/default.json` for the current project
+  - no .graph/v02.json found for the current project
   - stdin empty or malformed JSON
-  - load failure (soft — don't block edits on bellamem errors)
-  - no matching fields in the graph
+  - load/parse failure (soft — don't block edits on bellamem errors)
+  - graph is empty
 """
 
 from __future__ import annotations
@@ -57,24 +55,22 @@ from typing import Optional
 
 
 # ---------------------------------------------------------------------------
-# Tunables — intentionally conservative defaults for v1
+# Tunables — conservative defaults
 # ---------------------------------------------------------------------------
 
-# How many of each category to include in the advisory pack.
-_MAX_SELF_OBS = 8        # anti-patterns from __self__
-_MAX_INVARIANTS = 8      # ratified domain invariants (mass-ranked)
-_MAX_DISPUTES = 12       # ⊥ edges surfaced as "rejected approaches"
+_MAX_INVARIANT_META = 8      # invariant × metaphysical — what the system IS
+_MAX_INVARIANT_NORM = 8      # invariant × normative — what we commit to
+_MAX_OPEN_EPHEMERAL = 6      # work in progress
+_MAX_RETRACTED = 10          # rejected approaches
+_MAX_DISPUTES = 8            # live contradictions
 
-# Only disputes at or above this mass are eligible to BLOCK an edit.
-# Below this threshold they're still surfaced in the advisory pack,
-# but they can't refuse the tool call. Prevents low-confidence
-# disputes from gating edits unreasonably.
-_BLOCK_MIN_MASS = 0.60
+# Blocking threshold: a retracted/disputed concept must have at least
+# this many source_refs before it can block an edit. Prevents single-
+# voiced low-confidence rejections from blocking unreasonably.
+_BLOCK_MIN_REFS = 2
 
-# Minimum length of a dispute description before we'll substring-match
-# against it. Below this the match is too noisy (common short phrases
-# would fire constantly). 10 chars is enough to require a specific
-# reference, not a generic phrase.
+# Minimum length of a topic before substring-matching against it.
+# Below this the match is too noisy (short generic phrases).
 _BLOCK_MIN_DESC_LEN = 10
 
 
@@ -82,17 +78,15 @@ _BLOCK_MIN_DESC_LEN = 10
 # Snapshot discovery
 # ---------------------------------------------------------------------------
 
-def _find_snapshot(start: str) -> Optional[str]:
-    """Walk up from `start` looking for `.graph/default.json`.
+def _find_v02(start: str) -> Optional[str]:
+    """Walk up from `start` looking for `.graph/v02.json`.
 
     Returns the absolute path if found, None if we hit the filesystem
-    root without finding one. The guard operates on the innermost
-    enclosing bellamem project, so it works in monorepos and nested
-    checkouts.
+    root without finding one. Works in monorepos and nested checkouts.
     """
     p = os.path.abspath(start)
     while True:
-        candidate = os.path.join(p, ".graph", "default.json")
+        candidate = os.path.join(p, ".graph", "v02.json")
         if os.path.isfile(candidate):
             return candidate
         parent = os.path.dirname(p)
@@ -101,72 +95,103 @@ def _find_snapshot(start: str) -> Optional[str]:
         p = parent
 
 
+def _load_v02(path: str) -> Optional[dict]:
+    """Parse the v02.json file directly. Keeps the guard's import
+    surface small — no numpy, no bellamem.core at startup."""
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
 # ---------------------------------------------------------------------------
-# Pack builder
+# Pack builder — v0.2-native typed summary
 # ---------------------------------------------------------------------------
 
-def _build_pack(bella) -> str:
-    """Compose the advisory context pack from a loaded Bella.
+def _by_refs_desc(items: list[dict]) -> list[dict]:
+    return sorted(items, key=lambda c: -len(c.get("source_refs") or []))
 
-    Three sections, each mass-ranked:
-      - __self__ anti-patterns
-      - top ratified invariants (non-disputes, across all fields)
-      - ⊥ rejected approaches (all fields)
 
-    Returns a string suitable for `additionalContext`. Empty string
-    if the graph has nothing worth showing (caller treats empty as
-    "silent no-op, exit 0 with nothing on stdout").
+def _build_pack(data: dict) -> str:
+    """Compose the v0.2-native advisory pack.
+
+    Sections in epistemic priority order:
+      - invariant × metaphysical (what the system IS)
+      - invariant × normative (what we commit to)
+      - open ephemerals (work in progress)
+      - retracted approaches (rejected)
+      - dispute edges (contradictions)
     """
-    from .core.gene import REL_COUNTER
+    concepts: dict = data.get("concepts") or {}
+    edges: list = data.get("edges") or []
 
     lines: list[str] = []
 
-    # ----- __self__ (anti-patterns) -----
-    self_field = bella.fields.get("__self__")
-    if self_field and self_field.beliefs:
-        top_self = sorted(
-            self_field.beliefs.values(),
-            key=lambda b: -b.mass,
-        )[:_MAX_SELF_OBS]
-        if top_self:
-            lines.append("## self-observations (patterns to catch before the edit)")
-            for b in top_self:
-                lines.append(f"  m={b.mass:.2f}  {b.desc}")
-            lines.append("")
-
-    # ----- Top ratified invariants (not disputes, not __self__) -----
-    all_invariants: list[tuple[float, str, str]] = []
-    for fname, g in bella.fields.items():
-        if fname == "__self__":
-            continue
-        for b in g.beliefs.values():
-            if b.rel == REL_COUNTER:
-                continue  # disputes go to their own section
-            all_invariants.append((b.mass, fname, b.desc or ""))
-    all_invariants.sort(reverse=True)
-    if all_invariants:
-        lines.append("## top ratified invariants (respect these)")
-        for mass, fname, desc in all_invariants[:_MAX_INVARIANTS]:
-            lines.append(f"  [{fname[:22]}] m={mass:.2f}  {desc}")
+    # ----- invariant × metaphysical -----
+    invar_meta = _by_refs_desc([
+        c for c in concepts.values()
+        if c.get("class") == "invariant" and c.get("nature") == "metaphysical"
+    ])
+    if invar_meta:
+        lines.append("## what the system IS (invariant × metaphysical)")
+        for c in invar_meta[:_MAX_INVARIANT_META]:
+            refs = len(c.get("source_refs") or [])
+            lines.append(f"  [{refs:2}r] {c.get('topic', '')}")
         lines.append("")
 
-    # ----- Disputes (rejected approaches) -----
-    all_disputes: list[tuple[float, str]] = []
-    for g in bella.fields.values():
-        for b in g.beliefs.values():
-            if b.rel == REL_COUNTER:
-                all_disputes.append((b.mass, b.desc or ""))
-    all_disputes.sort(reverse=True)
-    if all_disputes:
-        lines.append("## ⊥ rejected approaches (do NOT re-suggest)")
-        for mass, desc in all_disputes[:_MAX_DISPUTES]:
-            lines.append(f"  m={mass:.2f}  {desc}")
+    # ----- invariant × normative -----
+    invar_norm = _by_refs_desc([
+        c for c in concepts.values()
+        if c.get("class") == "invariant" and c.get("nature") == "normative"
+    ])
+    if invar_norm:
+        lines.append("## what we commit to (invariant × normative)")
+        for c in invar_norm[:_MAX_INVARIANT_NORM]:
+            refs = len(c.get("source_refs") or [])
+            lines.append(f"  [{refs:2}r] {c.get('topic', '')}")
+        lines.append("")
+
+    # ----- open ephemerals (recent work) -----
+    open_eph = sorted(
+        [c for c in concepts.values()
+         if c.get("class") == "ephemeral" and c.get("state") == "open"],
+        key=lambda c: c.get("last_touched_at") or "",
+        reverse=True,
+    )
+    if open_eph:
+        lines.append(f"## open work ({len(open_eph)} ephemerals, top recent)")
+        for c in open_eph[:_MAX_OPEN_EPHEMERAL]:
+            lines.append(f"  [open] {c.get('topic', '')}")
+        lines.append("")
+
+    # ----- retracted ephemerals (rejected approaches) -----
+    retracted = [
+        c for c in concepts.values()
+        if c.get("class") == "ephemeral" and c.get("state") == "retracted"
+    ]
+    if retracted:
+        lines.append(f"## retracted approaches — do NOT re-suggest ({len(retracted)})")
+        for c in retracted[:_MAX_RETRACTED]:
+            refs = len(c.get("source_refs") or [])
+            lines.append(f"  [{refs}r] {c.get('topic', '')}")
+        lines.append("")
+
+    # ----- dispute edges -----
+    disputes = [e for e in edges if e.get("type") == "dispute"]
+    if disputes:
+        lines.append(f"## disputes — ⊥ edges ({len(disputes)})")
+        for e in disputes[:_MAX_DISPUTES]:
+            tgt_id = e.get("target")
+            tgt = concepts.get(tgt_id) if tgt_id else None
+            tgt_topic = tgt.get("topic", tgt_id) if tgt else tgt_id
+            lines.append(f"  ⊥ {tgt_topic}")
 
     return "\n".join(lines).rstrip()
 
 
 # ---------------------------------------------------------------------------
-# Block check — substring match against high-mass disputes
+# Block check — substring match against retracted + dispute targets
 # ---------------------------------------------------------------------------
 
 def _extract_new_content(tool_name: str, tool_input: dict) -> str:
@@ -175,8 +200,6 @@ def _extract_new_content(tool_name: str, tool_input: dict) -> str:
     Edit:       tool_input.new_string
     Write:      tool_input.content
     MultiEdit:  tool_input.edits[*].new_string   (joined)
-
-    Unknown tool shapes return empty — we can't block what we can't see.
     """
     if tool_name == "Write":
         return tool_input.get("content") or ""
@@ -194,40 +217,52 @@ def _extract_new_content(tool_name: str, tool_input: dict) -> str:
     return ""
 
 
-def _check_blocking(new_content: str, bella) -> Optional[tuple[float, str]]:
-    """Substring-match the intended edit against high-mass ⊥ disputes.
+def _check_blocking(
+    new_content: str, data: dict
+) -> Optional[tuple[int, str, str]]:
+    """Substring-match edit against retracted ephemerals + dispute targets.
 
-    Returns (mass, desc) on first hit, or None. Case-insensitive,
-    ignores disputes below _BLOCK_MIN_MASS or with short descriptions.
-
-    v1 design: literal substring only. A past session's rejected
-    phrase has to reappear verbatim for the guard to fire. False
-    negatives (paraphrased re-suggestion) are acceptable because the
-    advisory pack still surfaces the dispute; false positives (an
-    incidental substring collision) are very unlikely given the
-    10-char minimum + dispute phrasing tends to be specific. Semantic
-    matching is a v0.0.4b+ refinement.
+    Returns (refs, kind, topic) on first hit where kind is
+    "retracted" or "dispute"; None otherwise. Case-insensitive.
+    Ignores concepts below _BLOCK_MIN_REFS or with short topics.
     """
-    from .core.gene import REL_COUNTER
-
     if not new_content:
         return None
     haystack = new_content.lower()
     if not haystack.strip():
         return None
 
-    # Scan all fields for high-mass disputes
-    for g in bella.fields.values():
-        for b in g.beliefs.values():
-            if b.rel != REL_COUNTER:
-                continue
-            if b.mass < _BLOCK_MIN_MASS:
-                continue
-            needle = (b.desc or "").strip().lower()
-            if len(needle) < _BLOCK_MIN_DESC_LEN:
-                continue
-            if needle in haystack:
-                return (b.mass, b.desc)
+    concepts: dict = data.get("concepts") or {}
+    edges: list = data.get("edges") or []
+
+    # Retracted ephemerals
+    for c in concepts.values():
+        if c.get("class") != "ephemeral" or c.get("state") != "retracted":
+            continue
+        refs = len(c.get("source_refs") or [])
+        if refs < _BLOCK_MIN_REFS:
+            continue
+        topic = (c.get("topic") or "").strip().lower()
+        if len(topic) < _BLOCK_MIN_DESC_LEN:
+            continue
+        if topic in haystack:
+            return (refs, "retracted", c.get("topic", ""))
+
+    # Dispute-edge targets with enough refs
+    disputed_ids = {e.get("target") for e in edges if e.get("type") == "dispute"}
+    for cid in disputed_ids:
+        c = concepts.get(cid)
+        if not c:
+            continue
+        refs = len(c.get("source_refs") or [])
+        if refs < _BLOCK_MIN_REFS:
+            continue
+        topic = (c.get("topic") or "").strip().lower()
+        if len(topic) < _BLOCK_MIN_DESC_LEN:
+            continue
+        if topic in haystack:
+            return (refs, "dispute", c.get("topic", ""))
+
     return None
 
 
@@ -239,11 +274,10 @@ def main() -> int:
     """Read PreToolUse payload from stdin, emit guard output.
 
     Exits:
-      0 — advisory (stdout has the JSON with additionalContext)
-      0 — silent no-op (no snapshot, bad payload, load failure, etc.)
-      2 — BLOCKING (stderr has the reason, edit is refused)
+      0 — advisory (stdout has JSON with additionalContext)
+      0 — silent no-op (no v02.json, bad payload, load failure, etc.)
+      2 — BLOCKING (stderr has reason, edit is refused)
     """
-    # ----- Parse stdin -----
     try:
         raw = sys.stdin.read()
         if not raw.strip():
@@ -258,52 +292,46 @@ def main() -> int:
         tool_input = {}
     cwd = payload.get("cwd") or os.getcwd()
 
-    # ----- Find the snapshot for this project -----
-    snapshot_path = _find_snapshot(cwd)
-    if not snapshot_path:
+    v02_path = _find_v02(cwd)
+    if not v02_path:
         return 0
 
-    # ----- Load graph-only (fast path, no openai / embed cache) -----
-    try:
-        from .core.store import load_graph_only
-        bella = load_graph_only(snapshot_path)
-    except Exception as e:
-        # Soft failure: never block the edit on a bellamem error.
-        print(f"bellamem-guard: skipped ({e})", file=sys.stderr)
+    data = _load_v02(v02_path)
+    if not data:
+        print(f"bellamem-guard: skipped (failed to parse {v02_path})", file=sys.stderr)
         return 0
 
-    if not bella.fields:
+    if not (data.get("concepts") or {}):
         return 0
 
-    # ----- Blocking check (for Edit/Write/MultiEdit only) -----
+    # ----- Blocking check (Edit/Write/MultiEdit only) -----
     new_content = _extract_new_content(tool_name, tool_input)
-    hit = _check_blocking(new_content, bella)
+    hit = _check_blocking(new_content, data)
     if hit is not None:
-        mass, desc = hit
+        refs, kind, topic = hit
         file_hint = tool_input.get("file_path") or "(unknown file)"
         print(
             f"bellamem-guard: BLOCKING {tool_name} on {file_hint}\n"
-            f"  This edit re-introduces a ⊥ rejected approach "
-            f"(mass={mass:.2f}):\n"
-            f"    {desc}\n"
-            f"  If you believe this is stale, re-ratify it in a user "
+            f"  This edit re-introduces a {kind} concept "
+            f"({refs} source refs):\n"
+            f"    {topic}\n"
+            f"  If you believe this is stale, re-voice it in a user "
             f"turn and retry. Otherwise, pick a different approach.",
             file=sys.stderr,
         )
         return 2
 
     # ----- Advisory pack -----
-    pack = _build_pack(bella)
+    pack = _build_pack(data)
     if not pack:
         return 0
 
-    output = {
+    sys.stdout.write(json.dumps({
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
             "additionalContext": pack,
         }
-    }
-    sys.stdout.write(json.dumps(output))
+    }))
     sys.stdout.write("\n")
     return 0
 
