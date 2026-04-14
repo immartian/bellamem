@@ -21,21 +21,36 @@ def _pick_session(graph: Graph, session: Optional[str]) -> Optional[str]:
     """Resolve the session to replay.
 
     If `session` is set, use it verbatim. Otherwise pick the session
-    with the largest max(turn_idx) — "most recent activity" in the
-    absence of a wall-clock on every source.
+    with the most recent max(timestamp) — "what am I in right now"
+    in wall-clock terms. Sessions without any timestamped sources
+    fall back to max(turn_idx) so legacy graphs still resolve, but
+    any session that does carry timestamps wins over a timestamp-
+    less one regardless of turn count.
+
+    The earlier "longest session wins" heuristic surfaced yesterday's
+    800-turn session over today's 60-turn session — bad UX. Sources
+    carry Source.timestamp since the R1/timestamp work landed, so
+    wall-clock is the honest picker.
     """
     if session:
         return session if any(
             s.session_id == session for s in graph.sources.values()
         ) else None
-    by_session: dict[str, int] = {}
+    by_session_ts: dict[str, float] = {}
+    by_session_idx: dict[str, int] = {}
     for s in graph.sources.values():
-        cur = by_session.get(s.session_id, -1)
-        if s.turn_idx > cur:
-            by_session[s.session_id] = s.turn_idx
-    if not by_session:
-        return None
-    return max(by_session.items(), key=lambda kv: kv[1])[0]
+        if s.timestamp is not None:
+            cur_ts = by_session_ts.get(s.session_id, float("-inf"))
+            if s.timestamp > cur_ts:
+                by_session_ts[s.session_id] = s.timestamp
+        cur_idx = by_session_idx.get(s.session_id, -1)
+        if s.turn_idx > cur_idx:
+            by_session_idx[s.session_id] = s.turn_idx
+    if by_session_ts:
+        return max(by_session_ts.items(), key=lambda kv: kv[1])[0]
+    if by_session_idx:
+        return max(by_session_idx.items(), key=lambda kv: kv[1])[0]
+    return None
 
 
 def _concepts_for_turn(
