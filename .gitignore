@@ -58,5 +58,12 @@ llm_ew_cache.json
 # Claude Code session transcripts (if ever materialised inside the repo)
 *.jsonl
 
+# Node / TypeScript port
+node_modules/
+*.tsbuildinfo
+
+# Diff harness output
+.diff-harness/
+
 # Marketing — private, not for public repo
 marketing/

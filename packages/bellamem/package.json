@@ -1,0 +1,36 @@
+{
+  "name": "bellamem",
+  "version": "0.3.0-alpha.0",
+  "description": "Local accumulating memory for LLM coding agents — Node port of v0.2",
+  "type": "module",
+  "bin": {
+    "bellamem": "./dist/bin/bellamem.js",
+    "bellamem-guard": "./dist/bin/bellamem-guard.js"
+  },
+  "main": "./dist/src/index.js",
+  "types": "./dist/src/index.d.ts",
+  "scripts": {
+    "build": "tsc -p .",
+    "dev": "tsc -p . --watch",
+    "clean": "rm -rf dist",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "start": "node --loader tsx ./bin/bellamem.ts"
+  },
+  "dependencies": {
+    "openai": "^4.77.0",
+    "commander": "^12.1.0",
+    "proper-lockfile": "^4.1.2",
+    "env-paths": "^3.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/proper-lockfile": "^4.1.4",
+    "typescript": "^5.7.0",
+    "tsx": "^4.19.0",
+    "vitest": "^2.1.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
