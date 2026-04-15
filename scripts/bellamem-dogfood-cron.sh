@@ -18,8 +18,9 @@
 # Uninstall:
 #     crontab -l | grep -v bellamem-dogfood-cron | crontab -
 #
-# Lock: /tmp/bellamem-dogfood-cron.lock (flock, non-blocking — overlapping
-# ticks skip rather than queue).
+# Lock: <PROJECT_DIR>/.graph/.save.lock (flock, non-blocking — overlapping
+# ticks skip rather than queue). Per-project, so a save in another
+# project doesn't block this project's cron and vice versa.
 
 set -euo pipefail
 
@@ -30,7 +31,11 @@ PYTHON="/home/im3/.local/share/pipx/venvs/bellamem/bin/python"
 CLAUDE_PROJECT_DIR="/home/im3/.claude/projects/-media-im3-plus-labX-bellamem"
 LOG_DIR="${PROJECT_DIR}/.graph"
 LOG="${LOG_DIR}/dogfood-cron.log"
-LOCK="/tmp/bellamem-dogfood-cron.lock"
+# Per-project lock so this cron can't collide with a save in another
+# project. Matches cmd_save's lock path (cli.py `graph_path.parent /
+# ".save.lock"`). The earlier global /tmp/bellamem-dogfood-cron.lock
+# serialized every project on the machine against every other one.
+LOCK="${LOG_DIR}/.save.lock"
 
 cd "$PROJECT_DIR"
 mkdir -p "$LOG_DIR"

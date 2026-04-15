@@ -717,23 +717,33 @@ def cmd_save(args: argparse.Namespace) -> int:
     from bellamem.proto.store import DEFAULT_GRAPH_PATH
     import tempfile
 
-    # Acquire the same flock the dogfood cron uses so cmd_save and
-    # the cron serialize on one process at a time. Without this, a
+    # Acquire a per-graph flock so cmd_save and the cron serialize on
+    # one process at a time for the SAME graph file. Without this, a
     # user-invoked `bellamem save` can race a concurrent cron tick,
     # both load the graph at different times, and whichever saves
-    # last silently drops the other's in-flight concepts. Non-
-    # blocking — if the cron is currently running, bail with a
-    # clear message rather than queueing.
-    lock_path = "/tmp/bellamem-dogfood-cron.lock"
+    # last silently drops the other's in-flight concepts.
+    #
+    # The lock lives inside the project's .graph/ dir so it's
+    # inherently scoped to that project — a save in /project-a and
+    # a save in /project-b don't contend. The earlier /tmp/bellamem-
+    # dogfood-cron.lock was a single global path, which meant every
+    # project on the machine serialized against every other, and a
+    # slow first-run ingest in one project would block the cron in
+    # another. Non-blocking: if the lock is held, bail with a clear
+    # message rather than queueing.
+    graph_path_pre = Path(args.snapshot) if args.snapshot else DEFAULT_GRAPH_PATH
+    graph_path_pre.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = graph_path_pre.parent / ".save.lock"
     lock_fd = open(lock_path, "w")
     try:
         fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
         print(
             f"bellamem save: another ingest is already running "
-            f"(lock: {lock_path}).\n"
-            f"  Likely the dogfood cron is mid-tick. Wait for it to "
-            f"finish (check `tail .graph/dogfood-cron.log`) and retry.",
+            f"against this project (lock: {lock_path}).\n"
+            f"  Likely the dogfood cron is mid-tick, or another "
+            f"`bellamem save` is in progress in the same project. "
+            f"Wait for it to finish and retry.",
             file=sys.stderr,
         )
         return 2
