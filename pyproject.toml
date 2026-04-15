@@ -48,6 +48,7 @@ classifiers = [
 dependencies = [
     "numpy>=1.21",
     "openai>=1.0",
+    "platformdirs>=4.0",
 ]
 
 [project.optional-dependencies]

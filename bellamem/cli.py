@@ -57,6 +57,25 @@ def _resolve_snapshot(arg: str | None) -> str:
     return arg or default_snapshot_path()
 
 
+def _user_config_env_path() -> "Path":
+    """User-level bellamem config `.env` path (cross-platform).
+
+    Uses `platformdirs.user_config_dir` so the path is native on
+    Linux (`~/.config/bellamem/.env`, or `$XDG_CONFIG_HOME` if set),
+    macOS (`~/Library/Application Support/bellamem/.env`), and
+    Windows (`%APPDATA%\\bellamem\\.env`). The intended use is a
+    single place to drop `OPENAI_API_KEY` and other shared secrets
+    so you don't have to repeat them in every project's `.env`.
+
+    Returns the path whether or not the file exists — load_dotenv
+    treats a missing file as a no-op, so callers can rely on this
+    being side-effect-free.
+    """
+    from pathlib import Path
+    from platformdirs import user_config_dir
+    return Path(user_config_dir("bellamem")) / ".env"
+
+
 def _setup_embedder() -> None:
     """Build and install the embedder specified by env vars.
 
@@ -1473,11 +1492,15 @@ def main(argv: list[str] | None = None) -> int:
         sys.stdout.reconfigure(line_buffering=True)  # type: ignore[attr-defined]
     except (AttributeError, io.UnsupportedOperation):
         pass
-    # Load .env from the project root (same walk-up as default_snapshot_path),
-    # so subfolders inherit the same embedder config as the root. Without this,
-    # running bellamem from any subfolder finds the root snapshot but falls back
-    # to the `hash` embedder, and the snapshot signature check then fails loud.
+    # Env loading precedence: shell env > project .env > user .env.
+    # load_dotenv uses setdefault semantics, so whichever file loads
+    # first wins for keys still absent from os.environ. We load
+    # project first so per-project overrides take priority, then
+    # fall back to the user-level config for multi-project setups
+    # (e.g. OPENAI_API_KEY set once in ~/.config/bellamem/.env
+    # instead of in every project root).
     load_dotenv(str(project_root() / ".env"))
+    load_dotenv(str(_user_config_env_path()))
     args = build_parser().parse_args(argv)
     # No subcommand → implicit `resume`. Fill in the resume defaults
     # so cmd_resume can read them off args the same way it would if

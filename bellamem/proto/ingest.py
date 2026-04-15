@@ -403,9 +403,29 @@ def _load_env_file(env_path: Path) -> None:
         os.environ.setdefault(k.strip(), v.strip())
 
 
+def _user_config_env_path() -> Path:
+    """User-level bellamem config `.env` path (cross-platform).
+
+    Uses `platformdirs.user_config_dir` so the path is native on
+    Linux, macOS, and Windows. Same resolution as
+    `bellamem.cli._user_config_env_path`; duplicated here so
+    `python -m bellamem.proto.ingest` (used by the dogfood cron)
+    stays self-contained and doesn't import from bellamem.cli.
+    """
+    from platformdirs import user_config_dir
+    return Path(user_config_dir("bellamem")) / ".env"
+
+
 def main() -> int:
     import tempfile
+    # Precedence: shell env > cwd .env > user .env. setdefault
+    # semantics mean the first loader to set a key wins, so load
+    # cwd first and fall back to the user-level config for shared
+    # secrets (OPENAI_API_KEY, etc.). Fixes the cron case where a
+    # downstream project has no .env and the cron environment
+    # carries no shell vars either.
     _load_env_file(Path.cwd() / ".env")
+    _load_env_file(_user_config_env_path())
     SCRATCH = Path(tempfile.gettempdir()) / "bellamem-proto-tree"
     SCRATCH.mkdir(parents=True, exist_ok=True)
 
