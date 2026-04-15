@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>bellamem — graph</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">bellamem</div>
+  <nav>
+    <a href="/overview">overview</a>
+    <a href="/graph" class="active">graph</a>
+    <a href="/trace">trace</a>
+  </nav>
+  <div class="spacer"></div>
+  <div class="stats" id="topstats">loading…</div>
+</header>
+<main>
+  <div class="controls" id="controls">
+    <label>class
+      <select id="class-filter">
+        <option value="">all</option>
+        <option>invariant</option>
+        <option>decision</option>
+        <option>observation</option>
+        <option>ephemeral</option>
+      </select>
+    </label>
+    <label>min mass <input id="mass-min" type="range" min="0.5" max="1" step="0.01" value="0.5"></label>
+    <label><input id="session-color" type="checkbox"> color by session</label>
+    <button id="reheat">reheat</button>
+  </div>
+  <svg class="graph" id="svg"></svg>
+  <aside class="drawer" id="drawer">
+    <span class="close" id="drawer-close">×</span>
+    <div id="drawer-body"></div>
+  </aside>
+</main>
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<script type="module" src="/static/graph.js"></script>
+</body>
+</html>

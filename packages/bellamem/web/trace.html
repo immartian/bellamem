@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>bellamem — trace</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">bellamem</div>
+  <nav>
+    <a href="/overview">overview</a>
+    <a href="/graph">graph</a>
+    <a href="/trace" class="active">trace</a>
+  </nav>
+  <div class="spacer"></div>
+  <div class="stats" id="topstats">loading…</div>
+</header>
+<main>
+  <div class="controls">
+    <label>session <select id="session-picker"></select></label>
+    <span class="muted" id="session-meta"></span>
+  </div>
+  <div class="trace-layout">
+    <div class="trace-turn" id="turn-panel">pick a session to begin</div>
+    <div class="trace-panel" id="state-panel"></div>
+  </div>
+  <div class="scrubber">
+    <button id="prev">◀</button>
+    <input id="scrub" type="range" min="0" max="0" value="0">
+    <button id="next">▶</button>
+    <span class="count" id="count">0 / 0</span>
+  </div>
+</main>
+<script type="module" src="/static/trace.js"></script>
+</body>
+</html>

@@ -13,6 +13,7 @@ import { askText } from "./walker.js";
 import { audit, formatAudit } from "./audit.js";
 import { replayText } from "./replay.js";
 import { ConceptClass } from "./schema.js";
+import { startServer } from "./server.js";
 
 function scratchDir(): string {
   const d = join(tmpdir(), "bellamem-proto-tree");
@@ -198,6 +199,38 @@ export function buildProgram(): Command {
         sinceTurn: opts.since ?? 0,
         maxLines: opts.maxLines ?? 120,
       }));
+    });
+
+  program
+    .command("serve")
+    .description("Start the localhost web UI")
+    .option("--port <n>", "port to bind (default 7878)", (v) => parseInt(v, 10))
+    .option("--graph <path>", "path to v0.2 graph JSON")
+    .option("--no-open", "do not launch the browser on start")
+    .action(async (opts: { port?: number; graph?: string; open?: boolean }) => {
+      loadEnv();
+      const root = projectRoot();
+      const graphPath = opts.graph ?? graphPathFor(root);
+      const caches = cachePaths();
+      const handle = await startServer({
+        graphPath,
+        embedCachePath: caches.embed,
+        port: opts.port,
+      });
+      console.log(`bellamem web ui → ${handle.url}  (graph: ${graphPath})`);
+      if (opts.open !== false) {
+        try {
+          const { default: open } = await import("open");
+          await open(handle.url);
+        } catch { /* ignore */ }
+      }
+      const stop = async () => {
+        console.log("\nshutting down…");
+        await handle.close();
+        process.exit(0);
+      };
+      process.on("SIGINT", stop);
+      process.on("SIGTERM", stop);
     });
 
   return program;
