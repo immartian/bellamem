@@ -1,6 +1,7 @@
 import { Command } from "commander";
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
+// `resolve` used below in the serve action
 import { tmpdir } from "node:os";
 import * as lockfile from "proper-lockfile";
 import { loadEnv } from "./env.js";
@@ -14,6 +15,7 @@ import { audit, formatAudit } from "./audit.js";
 import { replayText } from "./replay.js";
 import { ConceptClass } from "./schema.js";
 import { startServer } from "./server.js";
+import { runInstall } from "./install.js";
 
 function scratchDir(): string {
   const d = join(tmpdir(), "bellamem-proto-tree");
@@ -202,22 +204,50 @@ export function buildProgram(): Command {
     });
 
   program
+    .command("install")
+    .description("Install Claude Code /bellamem slash command + user config template")
+    .option("--force", "overwrite existing slash command file")
+    .action((opts: { force?: boolean }) => {
+      const result = runInstall({ force: opts.force });
+      if (result.slashCommandWritten) {
+        console.log(`  wrote ${result.slashCommandPath}`);
+      } else {
+        console.log(`  kept  ${result.slashCommandPath}  (use --force to overwrite)`);
+      }
+      if (result.envWritten) {
+        console.log(`  wrote ${result.envPath}  (add OPENAI_API_KEY to enable ingest)`);
+      } else {
+        console.log(`  kept  ${result.envPath}`);
+      }
+      console.log();
+      console.log("  Restart Claude Code and try /bellamem in a project.");
+    });
+
+  program
     .command("serve")
-    .description("Start the localhost web UI")
+    .description("Start the localhost web UI (global multi-project by default)")
     .option("--port <n>", "port to bind (default 7878)", (v) => parseInt(v, 10))
-    .option("--graph <path>", "path to v0.2 graph JSON")
+    .option("--graph <path>", "pin to a single graph instead of discovering projects")
     .option("--no-open", "do not launch the browser on start")
     .action(async (opts: { port?: number; graph?: string; open?: boolean }) => {
       loadEnv();
-      const root = projectRoot();
-      const graphPath = opts.graph ?? graphPathFor(root);
       const caches = cachePaths();
       const handle = await startServer({
-        graphPath,
+        pinnedGraphPath: opts.graph ? resolve(opts.graph) : undefined,
         embedCachePath: caches.embed,
         port: opts.port,
       });
-      console.log(`bellamem web ui → ${handle.url}  (graph: ${graphPath})`);
+      if (handle.mode === "pinned") {
+        console.log(`bellamem web ui → ${handle.url}  (pinned: ${opts.graph})`);
+      } else {
+        console.log(`bellamem web ui → ${handle.url}  (${handle.projects.length} projects discovered)`);
+        for (const p of handle.projects.slice(0, 10)) {
+          console.log(`  · ${p.absPath}`);
+        }
+        if (handle.projects.length > 10) {
+          console.log(`  · … +${handle.projects.length - 10} more`);
+        }
+      }
       if (opts.open !== false) {
         try {
           const { default: open } = await import("open");

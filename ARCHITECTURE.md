@@ -2,391 +2,230 @@
 
 This document is the map. Read it once and the rest of the repo is legible.
 
-The core claim: **every component implements one of BELLA's six rules
-(R1–R6), plus a thin adapter layer that knows about chat transcripts.**
-Nothing else. The tool's job is context window management — retrieve
-the decisive facts for the agent's next step under a small token
-budget — and every piece of the code exists to serve that goal.
+Bellamem is **local accumulating memory for LLM coding agents**. The
+terminal CLI (`bellamem resume`, `save`, `ask`, `audit`, `replay`)
+and the localhost web UI (`bellamem serve`) are both read/write
+surfaces over one store: `.graph/v02.json`, a typed belief graph
+with per-turn provenance.
+
+The core claim: **every concept in the graph carries its sources,
+and every mass value is the sigmoid of a sum of log-odds bumps, one
+per citation.** Retrieval is therefore grounded — we can always point
+at the exact turns that ratified a belief.
+
+Theory lives in `bella/`. Implementation spec for the current schema
+is `docs/rewrite/v0.2-spec.md` — language-independent, ~1200 lines,
+the contract every port must honor.
 
 ---
 
-## Layers, top to bottom
+## Layout
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│  CLI                  bellamem ingest-cc / expand / audit   │
-│                       / before-edit / bench / entities      │
-├─────────────────────────────────────────────────────────────┤
-│  adapters/            chat.py        voice-aware regex EW   │
-│                       claude_code.py .jsonl + turn-pair     │
-│                       llm_ew.py      LLM cause + self-obs   │
-├─────────────────────────────────────────────────────────────┤
-│  core/                bella.py       forest + routing       │
-│                       gene.py        Belief + Gene + mass   │
-│                       ops.py         seven operations       │
-│                       expand.py      expand + before_edit   │
-│                       audit.py       bandaid + ratified     │
-│                       embed.py       pluggable embedders    │
-│                       store.py       atomic JSON snapshot   │
-├─────────────────────────────────────────────────────────────┤
-│  storage              <project>/.graph/default.json         │
-│                       + embed_cache.json                    │
-│                       + llm_ew_cache.json                   │
-└─────────────────────────────────────────────────────────────┘
-```
+packages/bellamem/            Node/TypeScript implementation (v0.3.0+)
+  src/
+    schema.ts                 Source · Concept · Edge · slugify · R1 mass
+    graph.ts                  Graph container + indices + dedup + R5 sweep
+    store.ts                  Atomic JSON load/save of .graph/v02.json
+    walker.ts                 askText — relevance + 1-hop edge walk
+    audit.ts                  5 health signals (density / structural /
+                              floor / spread / orphans)
+    resume.ts                 Typed structural summary (10 sections)
+    replay.ts                 Chronological per-session view
+    ingest.ts                 Streaming jsonl reader + per-turn classify
+                              + applyClassification + ingestSession loop
+    clients.ts                Embedder + TurnClassifier (OpenAI SDK)
+                              with sha256-keyed disk caches
+    trace.ts                  Session unroll + mass history replay
+                              (powers the web trace view)
+    server.ts                 Hono app + /api/* + SSE file-watcher
+    cli.ts                    Commander dispatch for 7 CLI ops + serve
+    env.ts / paths.ts         Env resolution, project root, Claude Code
+                              project-dir encoding
+    guard.ts                  PreToolUse hook body
+  bin/
+    bellamem.ts               CLI entry
+    bellamem-guard.ts         Guard hook entry
+  test/                       Vitest suites (51 tests)
+  web/
+    overview.html / graph.html / trace.html   UI shells
+    static/{app.css, overview.js, graph.js, trace.js}   client code
 
-**Architectural invariant** (enforced by `core/__init__.py`):
-`bellamem.core` never imports from `bellamem.adapters`. Core is
-domain-agnostic; domain knowledge lives in adapters. The same core
-could run on news, knowledge bases, support tickets — any stream of
-evidence.
+bella/                        BELLA theory (SPEC.md, VISION.md, …)
+docs/                         Plans, rewrite history, brand assets
+  rewrite/
+    v0.2-spec.md              Language-independent schema + ops contract
+    v0.3-node-plan.md         Why we ported; phased rollout
+    v0.3.1-web-ui-plan.md     Web UI scope + differentiator
+```
 
 ---
 
-## The data model
+## Invariants (don't break these)
 
-### Belief (`core/gene.py`)
+1. **Byte-compatible `.graph/v02.json`.** Any reader/writer must
+   produce a file byte-equivalent to the spec's schema. The
+   `v0.2.0-ref` tag holds the Python reference implementation that
+   the current Node port was validated against.
 
-One node in the tree.
+2. **Deterministic IDs.** `slugifyTopic` produces stable concept
+   ids across runs, processes, languages. `Edge.id` is
+   `sha256(type|source|target)[:16]`. `Source.id` is
+   `{session_id}#{turn_idx}`.
 
-```python
-@dataclass
-class Belief:
-    id: str                   # stable hash of (desc, parent)
-    desc: str                 # short fact, paraphrased
-    parent: Optional[str]     # parent belief id
-    rel: str                  # "→" (support), "⊥" (deny), "⇒" (cause)
-    children: list[str]
-    voices: set[str]          # independent source names
-    log_odds: float           # R1 Jaynes accumulator
-    n_voices: int             # count of distinct voices
-    embedding: list[float]    # from the active embedder
-    entity_refs: list[str]    # opaque entity strings for R6 bridging
-    mass_floor: float         # optional minimum mass (e.g., for pinned beliefs)
-```
+3. **R1 mass is frozen.** `_logit` / `_sigmoid` with
+   `MASS_DELTA_NEW_VOICE = 0.5`, `MASS_DELTA_REPEAT_VOICE = 0.1`,
+   starting mass 0.5. Changing any of these breaks graph continuity
+   across versions.
 
-`mass = sigmoid(log_odds)`. The `mass_floor` field lets a caller pin a
-belief's mass above a threshold — useful for hand-seeded beliefs or
-anchored decisions. It is *not* a governance mechanism; it's just a
-parameter.
+4. **Cache keys are frozen.** `PROMPT_VERSION = "v2"`. The classifier
+   cache key is `sha256(PROMPT_VERSION || turn_text || sorted(context_ids) || recent_ids)`
+   with `\x00` separators. Any prompt wording change requires bumping
+   the version and invalidating the cache.
 
-### Gene (`core/gene.py`)
+5. **Seven ops.** `resume`, `save`, `recall`, `why`, `ask`, `audit`,
+   `replay` + `serve` (web UI). Nothing else is in the v0.2 contract.
+   `save` ingests a session jsonl; the rest are read-only.
 
-One *field* — a forest of beliefs on a single topic.
-
-```python
-class Gene:
-    name: str                       # e.g. "authentication", "__self__"
-    beliefs: dict[str, Belief]
-    roots: list[str]                # top-level beliefs in this field
-```
-
-Fields are the unit that emerges under R3. When a new claim doesn't
-embed close to any existing field, a new gene is born. When centroids
-converge (future R3 heal pass), fields can merge.
-
-### Bella (`core/bella.py`)
-
-The whole forest.
-
-```python
-class Bella:
-    fields: dict[str, Gene]                       # name → gene
-    cursor: dict[str, dict]                       # jsonl cursor per source
-    _entity_index: dict[str, list[(field, bid)]]  # R6 entity → beliefs
-```
-
-`Bella.ingest(claim)` is the only way beliefs enter the tree.
-
-### Reserved field namespace
-
-Fields whose name starts with `__` are **reserved**. The only reserved
-field currently in use is `__self__`, which holds R4 self-observations
-extracted by the LLM EW. Adapters cannot write to reserved fields
-directly via routing — they must express intent through `Claim.relation`
-and core decides where it goes. This keeps domain knowledge out of
-core-owned fields.
+6. **Fail loud, don't cache errors.** Classifier errors return a
+   synthetic `act=none` that is NEVER written to the cache. Learned
+   the hard way when a missing `OPENAI_API_KEY` poisoned 637 turns
+   as cached `none` responses.
 
 ---
 
-## The seven operations (`core/ops.py`)
+## Data model, briefly
 
-Every mutation of the belief tree is exactly one of these. No other
-writes.
+### Source — immutable turn pointer
 
-| op | meaning | R-rule |
-|---|---|---|
-| **CONFIRM** | `⊨ B` — accumulate evidence for existing belief | R1 |
-| **AMEND** | `⊨ B ∧ δ` — confirm + refine description | R1 + R2 |
-| **ADD** | `⊢ B' → B` — new supporting child belief | R1 |
-| **DENY** | `⊢ B' ⊥ B` — new counter-belief (⊥ edge) | R1 |
-| **CAUSE** | `⊢ B' ⇒ B` — new causal predecessor (⇒ edge) | R1 + R6 |
-| **MERGE** | fold one belief into another (tree coherence) | R2 + R3 |
-| **MOVE** | reparent a belief for better local structure | R2 |
+```ts
+{
+  session_id: string           // first 8 chars of jsonl sessionId
+  file_path: string
+  speaker: "user" | "assistant"
+  turn_idx: number             // 0-based among kept turns
+  text_preview: string         // 200 chars persisted
+  timestamp: number | null     // POSIX seconds
+}
+```
+`id = "{session_id}#{turn_idx}"`.
 
-Adding a new op is a schema change. Don't.
+### Concept — topic-keyed, dual-axis classified
+
+```ts
+{
+  id: string                   // slugifyTopic(topic)
+  topic: string
+  class: "invariant" | "decision" | "observation" | "ephemeral"
+  nature: "factual" | "normative" | "metaphysical"
+  state: null | "open" | "consumed" | "retracted" | "stale"
+  mass: number                 // starts 0.5, R1 accumulates
+  voices: string[]             // ordered, deduped speakers
+  source_refs: string[]        // ordered, deduped source ids
+  first_voiced_at / last_touched_at: string | null
+  parent: string | null        // tree spine (optional)
+}
+```
+
+Class is the temporal profile, nature is the epistemic type. Only
+ephemerals carry state — all other classes have `state=null`.
+
+Mass is R1 applied at the concept: each `cite(source_id, speaker)`
+call that introduces a new speaker bumps log-odds by +0.5; a repeat
+speaker bumps by +0.1. Idempotent on duplicate source_id.
+
+### Edge — first-class typed relationship
+
+```ts
+{
+  id: string                   // sha256(type|source|target)[:16]
+  type: "support" | "dispute" | "cause" | "elaborate" |
+        "voice-cross" | "retract" |
+        "consume-success" | "consume-failure"
+  source: string               // source_id (turn) OR concept_id
+  target: string               // always a concept_id
+  established_at: string
+  voices: string[]
+  confidence: "low" | "medium" | "high"
+}
+```
+
+Edge identity is `(type, source, target)`. Same semantic edge voiced
+twice accumulates voices and bumps confidence (low→medium at 2
+voices, →high at 3).
 
 ---
 
-## The six rules, operationally
+## Ingest flow
 
-### R1 — accumulate (mass)
-
-**Implementation**: `Belief.accumulate(lr, voice)`
-
-```python
-log_odds += log(lr)
-mass = sigmoid(log_odds)
+```
+session jsonl                             (Claude Code)
+   │  read_session_turns  (streaming line-by-line; honors --tail)
+   ▼
+turn stream   { sessionId, speaker, turn_idx, text, timestamp }
+   │
+   │  for each turn:
+   │    1. if already ingested → skip (idempotent)
+   │    2. assembleContext(graph, turn) →
+   │         { nearest_k=8, open_ephemerals_in_session, recent_3 }
+   │    3. classifier.classify(...)  // OpenAI, cached by sha256
+   │    4. applyClassification(graph, turn, result)
+   │         · addSource
+   │         · for each cite: addEdge(turn → concept) + R1 cite +
+   │           state transitions on ephemerals
+   │         · for each create: embed topic → findSimilarConcept
+   │           (DEDUP_COSINE=0.78) → addConcept + R1 cite
+   │         · for each concept_edge: addEdge
+   │
+   ▼
+.graph/v02.json   (atomic temp-then-rename write)
 ```
 
-Independent voices compound. Saying the same thing 5 times with 5
-different sources produces mass ≈ sigmoid(5 × log(lr)). Same-voice
-repetition is attenuated by a 0.1 factor — a single source cannot
-inflate its own claim.
-
-### R2 — structure (entropy)
-
-**Implementation (partial)**: `core/ops.py:move`, `core/ops.py:merge`,
-`core/audit.py:_BANDAID_RE`
-
-The MOVE and MERGE ops exist; an automatic heal pass that calls them
-is not yet wired. The audit detects R2 entropy signals via the bandaid
-regex — a subtree with 3+ children matching `fix|workaround|guard|
-special-case|patch` patterns is a signal that the parent is a
-structural problem, not a series of isolated bugs.
-
-### R3 — emerge (fields from convergence)
-
-**Implementation**: `core/bella.py:Bella.find_field` + field birth in `ingest`.
-
-Fields are born when a claim doesn't embed close to any existing
-field's beliefs (cosine < `FIELD_MATCH`). They can merge when root
-centroids converge — the emergence pass from the news-epistemics
-reference implementation is not yet ported.
-
-### R4 — self-refer (Ψ)
-
-**Implementation**: `__self__` reserved field, populated by
-`adapters/llm_ew.py:find_self_observations`.
-
-The LLM EW identifies first-person habit statements in assistant
-messages ("I tend to reach for try/except when I hit a KeyError") and
-emits them as `Claim(relation="self_observation")`. Core routes these
-to `__self__` regardless of embedding similarity (this is the one place
-similarity-based routing is bypassed).
-
-`expand_before_edit` loads the top self-observations relevant to the
-current focus. When the agent is about to do something, its own prior
-pattern statements surface as part of the context.
-
-### R5 — converge (feedback with attenuation)
-
-**Implementation**: turn-pair retroactive ratification in
-`adapters/claude_code.py:ingest_session`.
-
-State machine:
-1. Assistant turn N → ingest claims at low `lr` (hypothesis)
-2. User turn N+1 → classify reaction via
-   `adapters/chat.py:classify_reaction`
-3. affirm → `accumulate(lr=2.2, voice="user")` on all pending claims
-4. correct → `accumulate(lr=0.4, voice="user")` (dampens log_odds)
-5. neutral → leave pending claims alone
-
-The user is a second independent voice under Jaynes's rule. User
-affirmation is exactly the independent evidence R1 is meant to reward.
-
-### R6 — entangle (entities bridge fields)
-
-**Implementation**: `Bella._entity_index` + `expand_before_edit`'s
-bridge layer.
-
-Every claim carries `entity_refs: list[str]` — opaque strings extracted
-from the claim text (file paths, code identifiers, library names).
-On ingest, each ref is added to `entity_index: dict[entity, [(field, bid), ...]]`.
-The before-edit mode looks up the focus entity and pulls every belief
-that mentions it, regardless of which field the belief lives in.
-
-This is the graph doing its job: touching `auth.py` surfaces beliefs
-from the `session` field, the `database` field, and the `testing`
-field if they all co-mentioned `auth.py` at some point.
+R5 (stale sweep) runs at the end of every ingest: open ephemerals
+whose last_touched_at source is older than 7 days flip to stale.
 
 ---
 
-## Temporal / recency semantics
+## Read surfaces
 
-bellamem records temporal data on every belief but uses it **selectively**.
-The short answer: **recency is a 10% tiebreaker for `expand()`; it is
-deliberately absent from `expand_before_edit()`; the turn-pair pass
-uses temporal ordering to detect reactions.**
-
-### What's stored
-
-Every `Belief` carries:
-
-- `event_time` — when the belief was first ingested
-- `last_touched` — when it was last accumulated on (by a new claim, a
-  user ratification, or a correction)
-
-Both are `time.time()` floats. Persisted in the snapshot; restored on load.
-
-### Where recency is used
-
-**1. `expand()` generic mode** includes a recency layer at 10% of the budget:
-
-```
-60 %  mass-ranked beliefs (tie-broken by focus relevance)
-30 %  focus-relevant beliefs
-10 %  recency tail (ranked by 1 / (now - last_touched))
-```
-
-For "what did we decide recently?" style queries, this surfaces the
-tail of recently-touched beliefs. Only 10% — mass and relevance dominate.
-Recency is a tiebreaker, not a primary signal.
-
-**2. The turn-pair retroactive ratification uses temporal ordering.**
-`adapters/claude_code.py:ingest_session` holds a `assistant_pending`
-list of the *immediately preceding* assistant turn's beliefs. When a
-user turn arrives, the reaction classifier decides affirm / correct /
-neutral, and the pending list is updated with `accumulate()` calls
-carrying `voice="user"`. The temporal window is "the last turn" — not
-a time-decay curve.
-
-**3. Same-voice attenuation in `Belief.accumulate()`** applies a 0.1
-factor to `lr` when the same voice repeats. This is mildly
-temporal-adjacent: a single source can't keep promoting its own claim
-by saying it again. But it's "same voice," not "same time."
-
-### Where recency is absent (and why)
-
-**`expand_before_edit()` has no recency layer.** By deliberate design:
-
-> Recency in before-edit mode biases toward the last bandaid. The
-> invariant that tells you not to repeat it is usually old, not recent.
-
-The 5-layer budget (40/20/20/10/10 across invariants/disputes/causes/
-bridges/self-model) leaves zero budget for recency. An edit is a moment
-of risk; loading the most recent activity is exactly the wrong prior.
-The oldest principle — the one you've been quietly violating — is
-more valuable than the newest patch.
-
-### What's intentionally NOT implemented
-
-- **No mass decay over time.** A decision ratified ten sessions ago has
-  the same mass as one ratified yesterday. Decisions are durable until
-  explicitly contradicted.
-- **No TTL on disputes.** A "don't do X" from months ago is still in
-  the tree blocking re-suggestion.
-- **No age-based pruning.** The tree grows monotonically until you
-  `bellamem reset`. At ~10k beliefs an archive policy will be needed;
-  not yet.
-
-This is the same design choice that sits behind the `/compact`
-comparison: **bellamem reweights by importance, not by age**. `/compact`
-preserves whatever is in the narrative summary it produces; bellamem
-preserves whatever has accumulated mass and structural significance.
-That choice is what makes the horizon compression work — recency-based
-compression can't reach the old invariants that bandaid-prone edits
-violate, because they're exactly the facts recency is trained to drop.
+- **`resume`** — 10-section typed layout, ranked by mass within
+  invariants and by last_touched_at within ephemerals/decisions.
+  This is the primary context-reconstitution entry point.
+- **`ask` / `recall` / `why`** — walker.ts. Scoring is
+  `max(substring, cosine) × mass`, followed by a 1-hop edge walk
+  with dispute/retract/cause/support/elaborate sections.
+- **`audit`** — 5 signals with frozen thresholds. Surfaces in
+  resume as red flags (soft/hard only).
+- **`replay`** — chronological per-session view. Session picker
+  prefers max-timestamp over max-length.
+- **`serve`** — Hono localhost web UI. Three views backed by
+  `/api/*` JSON endpoints: **overview** (audit + histogram +
+  class×nature grid + session panorama), **graph** (D3 force-
+  directed with session coloring and concept drawer), **trace**
+  (session picker + turn-by-turn scrubber with live R1 mass
+  deltas — the provenance-visible differentiator).
 
 ---
 
-## The 5-layer before-edit pack
+## Running the dogfood loop
 
-`core/expand.py:expand_before_edit` is the headline feature. Budget:
-
-```
-40%  invariants     — high-mass ratified beliefs (mass ≥ 0.80)
-                      tie-broken by focus relevance
-20%  disputes       — ⊥ beliefs touching focus
-                      (prevents re-suggestion of rejected approaches)
-20%  causes         — ⇒ chains near focus
-                      (root-cause awareness)
-10%  bridges        — R6 entity co-mentions
-                      (whole-picture neighborhood)
-10%  self-model     — R4 __self__ observations close to focus
-                      (agent's own anti-patterns)
+```bash
+cd packages/bellamem
+npm install
+npm run build                              # tsc → dist/
+node dist/bin/bellamem.js resume --graph ../../.graph/v02.json
+node dist/bin/bellamem.js audit
+node dist/bin/bellamem.js serve --graph ../../.graph/v02.json
+npm test                                   # 51 vitest suites
 ```
 
-**Recency is absent.** Layers are ordered so that principled invariants
-load first, disputes come next (blocking rejected approaches), causes
-third (root-cause awareness), bridges fourth (whole-picture), and
-self-model last (how the agent tends to fail). The pack reads top-down
-as a chain of custody for the decision.
+Set `OPENAI_API_KEY` in your shell or the project `.env` to enable
+ingest. Without it, read-side ops still work against an existing
+graph; `save` will fail closed on the first LLM call.
 
-The generic `expand()` uses a different 60/30/10 mass / relevance /
-recency split — appropriate for "what did we decide about X?" style
-questions where recency is useful.
+## Python reference
 
----
-
-## Claim → belief flow, end to end
-
-```
-1. Claude Code .jsonl line          — user or assistant turn
-2. adapters/claude_code.py          — iter_new_turns() via cursor
-3. adapters/chat.py                 — split_sentences + voice-aware classify
-4. adapters/llm_ew.py (optional)    — find_cause_pairs + find_self_observations
-5. Claim(text, voice, lr, relation, target_hint, target_field)
-6. Bella.ingest(claim)              — route, apply op, update entity index
-7. Belief in gene with log_odds, voices, embedding, entity_refs
-8. (next user turn) turn-pair pass  — retroactive affirm/correct
-9. store.save()                     — atomic JSON snapshot
-```
-
-No step in this chain is more than ~50 lines of code. The whole
-pipeline fits in your head while editing it — that's the design goal,
-not an accident.
-
----
-
-## Pluggable embedders (`core/embed.py`)
-
-Four backends behind one `Embedder` protocol:
-
-| backend | dim | cost | use when |
-|---|---|---|---|
-| **HashEmbedder** | 256 | free | zero-dep default, testing, CI |
-| **SentenceTransformerEmbedder** | 384 | free | local, quality, no API |
-| **OpenAIEmbedder** | 1536 | ~$0.02/M | production quality |
-| **DiskCacheEmbedder** | (wraps) | — | always wrap non-hash |
-
-Factory: `make_embedder_from_env()` reads `BELLAMEM_EMBEDDER`. The
-snapshot records the embedder's `(name, dim)` signature and `load()`
-fails loud if the current embedder differs — you cannot accidentally
-mix vectors from two backends.
-
-Disk cache uses batched saves (every 50 misses) plus explicit `flush()`
-at end of ingest. Before that fix, a full ingest took 7+ minutes of
-disk thrashing; after, ~15 seconds.
-
----
-
-## Reading order for a new contributor
-
-Read in this order; ~2000 lines total.
-
-1. `bellamem/core/gene.py` — Belief + Gene + mass
-2. `bellamem/core/ops.py` — seven operations
-3. `bellamem/core/bella.py` — routing + ingest
-4. `bellamem/core/expand.py` — the headline feature
-5. `bellamem/adapters/chat.py` — the EW
-6. `bellamem/adapters/claude_code.py` — turn-pair ratification
-7. `bellamem/adapters/llm_ew.py` — structural extraction
-8. `bellamem/core/audit.py` — the report surface
-9. `bellamem/bench.py` — how we measure
-
----
-
-## What's not built yet
-
-Listed in [CHANGELOG.md](CHANGELOG.md) under v0.0.2 "not built."
-Largest missing pieces:
-
-- **MCP server + hooks** — integration with Claude Code as an automatic guardrail
-- **R2 heal pass** — periodic local restructure (MOVE/MERGE calls)
-- **Batched embedding ingest** — ~5× speedup on cold caches
-- **SQLite backing store** — when JSON snapshot starts hurting (~10k beliefs)
-- **Held-out bench** — split-half test to eliminate self-reference bias
-
-None are blockers; all are follow-up work on the core mission (better
-context under a smaller budget).
+The Python v0.2 implementation was frozen at tag `v0.2.0-ref` and
+deleted from master after the Node port's diff harness confirmed
+byte-for-byte equivalence on resume/audit/replay against the live
+graph. To recover the reference: `git checkout v0.2.0-ref`.

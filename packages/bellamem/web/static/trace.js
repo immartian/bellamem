@@ -1,4 +1,6 @@
-// bellamem session trace — turn-by-turn replay
+// bellamem session trace — turn-by-turn replay, project-scoped
+const PREFIX = location.pathname.match(/^\/p\/[^/]+/)?.[0] ?? "";
+
 function esc(s) {
   return String(s).replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
 }
@@ -7,8 +9,8 @@ let currentTrace = null;
 let currentIdx = 0;
 
 async function loadSessions() {
-  const sessions = await fetch("/api/sessions").then(r => r.json());
-  const stats = await fetch("/api/audit").then(r => r.json());
+  const sessions = await fetch(`${PREFIX}/api/sessions`).then(r => r.json());
+  const stats = await fetch(`${PREFIX}/api/audit`).then(r => r.json());
   document.getElementById("topstats").textContent =
     `${stats.nConcepts} concepts · ${stats.nEdges} edges · ${sessions.length} sessions`;
   const picker = document.getElementById("session-picker");
@@ -27,7 +29,7 @@ async function loadSessions() {
 }
 
 async function loadTrace(sid) {
-  const trace = await fetch(`/api/session/${encodeURIComponent(sid)}/trace`).then(r => r.json());
+  const trace = await fetch(`${PREFIX}/api/session/${encodeURIComponent(sid)}/trace`).then(r => r.json());
   if (trace.error) {
     document.getElementById("turn-panel").textContent = trace.error;
     return;
@@ -114,7 +116,7 @@ window.addEventListener("keydown", (e) => {
 });
 
 function connectWatch() {
-  const es = new EventSource("/api/watch");
+  const es = new EventSource(`${PREFIX}/api/watch`);
   es.addEventListener("reload", () => window.location.reload());
   es.onerror = () => { es.close(); setTimeout(connectWatch, 1500); };
 }

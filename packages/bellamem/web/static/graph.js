@@ -1,5 +1,6 @@
-// bellamem force-directed graph view
+// bellamem force-directed graph view — project-scoped
 // Depends on global d3 (loaded from CDN in graph.html)
+const PREFIX = location.pathname.match(/^\/p\/[^/]+/)?.[0] ?? "";
 
 const CLASS_COLORS = {
   invariant: "#7cc4ff",
@@ -23,7 +24,7 @@ function esc(s) {
 }
 
 async function load() {
-  const graph = await fetch("/api/graph").then(r => r.json());
+  const graph = await fetch(`${PREFIX}/api/graph`).then(r => r.json());
   const stats = graph.stats ?? {};
   document.getElementById("topstats").textContent =
     `${stats.n_concepts} concepts · ${stats.n_edges} edges · ${stats.n_sources} sources`;
@@ -131,7 +132,7 @@ function drag() {
 }
 
 async function openDrawer(cid) {
-  const d = await fetch(`/api/concept/${encodeURIComponent(cid)}`).then(r => r.json());
+  const d = await fetch(`${PREFIX}/api/concept/${encodeURIComponent(cid)}`).then(r => r.json());
   const { concept } = d;
   const sourcesHtml = d.source_refs_expanded.map(s =>
     `<div class="muted">${s.source_id} [${s.speaker ?? "?"}]<br>${esc((s.text_preview ?? "").slice(0, 180))}</div>`
@@ -166,7 +167,7 @@ document.getElementById("session-color").onchange = () => render(currentGraph);
 document.getElementById("reheat").onclick = () => { if (sim) sim.alpha(1).restart(); };
 
 function connectWatch() {
-  const es = new EventSource("/api/watch");
+  const es = new EventSource(`${PREFIX}/api/watch`);
   es.addEventListener("reload", () => window.location.reload());
   es.onerror = () => { es.close(); setTimeout(connectWatch, 1500); };
 }

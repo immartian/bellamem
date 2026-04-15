@@ -4,6 +4,51 @@ All notable changes will be documented in this file. This project aims
 for [Semantic Versioning](https://semver.org). Until v1.0, everything
 is subject to change.
 
+## [0.3.0-alpha] — 2026-04-15 — Node/TypeScript rewrite
+
+Full port to TypeScript. Python v0.2 is frozen at tag `v0.2.0-ref`
+and removed from master. `.graph/v02.json` is unchanged — the Node
+port reads and writes byte-identical graphs, validated by a diff
+harness against the reference implementation on the live 567-concept
+session graph.
+
+**Added**
+- `packages/bellamem/` — Node port of the v0.2 core. Same seven ops
+  (resume/save/recall/why/ask/audit/replay), same R1 mass formula,
+  same frozen `PROMPT_VERSION = "v2"` classifier prompt.
+- `bellamem serve` — localhost web UI on port 7878 (Hono). Three
+  views: **overview** (audit + mass histogram + class × nature grid),
+  **graph** (D3 force-directed with session coloring and concept
+  drawer), **trace** (turn-by-turn session replay with live R1 mass
+  deltas — the provenance-visible differentiator vs claude-mem).
+- `bellamem install` — writes `~/.claude/commands/bellamem.md` and
+  a user-config `.env` template so `/bellamem` works in Claude Code
+  out of the box.
+- `docs/rewrite/v0.2-spec.md` — language-independent spec (~1200
+  lines) that any future port must implement. Freezes the schema,
+  R1 formula, classifier prompt (verbatim), cache keys, audit
+  thresholds.
+- `docs/rewrite/v0.3-node-plan.md`, `v0.3.1-web-ui-plan.md` — why
+  we ported, phased rollout, web UI scope.
+- Vitest suite (51 tests) covering schema, graph, audit, walker,
+  resume, replay, and live-graph round-trip fidelity.
+
+**Removed**
+- Python package (`bellamem/`, `tests/`, `benchmarks/`,
+  `experiments/`, `pyproject.toml`). Recoverable via
+  `git checkout v0.2.0-ref`.
+- Flat v0.1 commands dropped for v0.3.0: `expand`, `emerge`,
+  `before-edit`, `prune`, `decay`, `scrub`, `surprises`, `entities`,
+  `render`, `bench`, `ingest-cc`. The walker (`ask`/`recall`/`why`)
+  subsumes retrieval; the typed graph obviates the rest.
+- `THEORY.md`, `CONTRIBUTING.md` — both Python-specific; the v0.2
+  spec doc is the new implementation reference.
+
+**Migration**
+- `.graph/v02.json` is unchanged — no data migration required.
+- If you were on Python: `pipx uninstall bellamem`, install the Node
+  package, then `bellamem install` to refresh the slash command.
+
 ## [0.2.3] — 2026-04-14 — 3D viz port to v0.2
 
 Closes Phase A of the VIZ_DESIGN spec — the Three.js 3D visualization

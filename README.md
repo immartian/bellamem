@@ -4,8 +4,11 @@
 
 **~~RAG retrieves documents.~~ Agents need to retrieve beliefs.**
 
-> Bella is the visual brand; the Python package and CLI remain
-> `bellamem`. `pipx install bellamem`, then `bellamem save`.
+> Bella is the visual brand; the Node package and CLI are `bellamem`.
+> `npx bellamem install`, then `bellamem save`. **v0.3.0-alpha** is a
+> TypeScript port of the v0.2 Python reference — byte-compatible on
+> `.graph/v02.json`, plus a **localhost web UI** (`bellamem serve`)
+> with a session trace replay view that Python never had.
 
 ---
 
@@ -181,34 +184,36 @@ mass, turn-hubs make the hypergraph structure visible as rosettes.
 
 ## Install
 
-`pipx` is the recommended path — a single global `bellamem` command,
-no `.venv` to remember, no PATH surgery:
+**npm (global)** — one command on PATH:
 
 ```bash
-pipx install bellamem
-# or, from a local clone:
+npm install -g bellamem
+bellamem install                 # writes ~/.claude/commands/bellamem.md
+```
+
+**npx (no global install)** — ephemeral, but the slash command still
+needs a one-time write:
+
+```bash
+npx bellamem install
+npx bellamem save
+```
+
+**From source (this repo)**:
+
+```bash
 git clone https://github.com/immartian/bellamem
-pipx install -e ./bellamem                  # editable install, still global
+cd bellamem/packages/bellamem
+npm install
+npm run build
+node dist/bin/bellamem.js install
 ```
 
-Per-project venv also works:
-
-```bash
-cd your-project
-python3 -m venv .venv
-.venv/bin/pip install bellamem
-```
-
-Optional extras:
-
-```bash
-pipx inject bellamem 'sentence-transformers>=2.2'   # local embeddings
-pipx inject bellamem 'openai>=1.0'                  # OpenAI embeddings + LLM EW
-# or with pip:
-pip install 'bellamem[st]'      # sentence-transformers
-pip install 'bellamem[openai]'  # OpenAI
-pip install 'bellamem[all]'     # both
-```
+`bellamem install` writes:
+- `~/.claude/commands/bellamem.md` — the `/bellamem` Claude Code slash
+  command, shelling out to the `bellamem` binary on PATH.
+- `~/.config/bellamem/.env` — a template with `OPENAI_API_KEY` commented
+  out. Fill it in to enable ingest.
 
 ### Setting `OPENAI_API_KEY`
 
@@ -257,56 +262,51 @@ the same transcript costs nothing — only *new* turns get classified;
 — `bellamem save` is idempotent and can be called on demand (e.g.
 from a git hook, a timer, or manually).
 
-**Requirements:** Python 3.10+. Git (Bella scopes per-project state via
+**Requirements:** Node 20+. Git (Bella scopes per-project state via
 the git repo root). No other system dependencies.
 
 ---
 
 ## Quickstart
 
-Three retrieval modes — one for each question you actually ask
-about your memory. Most workflows live in these three commands:
+Seven ops cover the whole surface — ingest, three retrieval modes,
+audit, replay, and the web UI.
 
 | Command | Question |
 |---|---|
-| `bellamem expand "X"` | *What do we **believe** about X, ranked by importance?* |
-| `bellamem surprises` | *What just **changed** — what mattered?* |
-| `bellamem replay [X]` | *What did we **say** — in what order?* |
-
-Plus utility commands for ingest, audit, render, prune, and bench:
+| `bellamem resume` | *Where am I? What's been decided, what's open?* |
+| `bellamem save` | *Ingest this session into the graph* |
+| `bellamem ask "X"` | *Mass-ranked beliefs about X + 1-hop edge walk* |
+| `bellamem recall "X"` | *Same as ask — the everyday retrieval alias* |
+| `bellamem why "X"` | *What does X cause, what caused it, what does a fix have to respect* |
+| `bellamem audit` | *5 health signals over the graph* |
+| `bellamem replay` | *Chronological turn-by-turn view of the current session* |
+| `bellamem serve` | *Localhost web UI with session trace scrubber* |
 
 ```bash
-# Ingest Claude Code sessions for the current project.
-# Auto-runs R3 consolidation (merges near-duplicates) on new claims.
+# Ingest this project's most recent Claude Code session.
+# Idempotent — re-runs only process new turns.
 bellamem save
+bellamem save --tail 50                       # last 50 turns only
 
-# Three retrieval modes — same memory, different questions:
-bellamem expand "what did we decide about persistence"
-bellamem surprises                                      # top jumps, sign flips, disputes
-bellamem replay                                         # narrative timeline
-bellamem replay "ad-hoc bandaid pattern"                # focused narrative
+# Retrieve — same memory, three framings:
+bellamem resume                                # the structured snapshot
+bellamem ask "what did we decide about persistence"
+bellamem why "retry-jitter fix"                # cause chain + invariants + disputes
 
-# The pre-edit pack: no recency, surfaces invariants + disputes + causes
-bellamem before-edit "should I wrap this in try/except" --entity embed.py
-
-# Health report: bandaid piles, duplicates, garbage field names, mass limbo
+# Health:
 bellamem audit
 
-# Render the graph as a picture (needs the [viz] extra or graphviz CLI)
-bellamem render --out graph.svg                           # whole forest
-bellamem render --out disputes.svg --disputes-only        # just ⊥ edges
-bellamem render --out auth.svg --focus "auth tokens"      # subgraph around a focus
+# Time:
+bellamem replay                                # tail of the current session
+bellamem replay --session 7e315796 --max-lines 30
 
-# Forget orphan leaves that never earned their place (dry run by default)
-bellamem prune                        # preview candidates
-bellamem prune --apply                # actually remove them
-
-# Empirically compare context strategies (flat, compact, RAG, Bella)
-bellamem bench
+# Web UI — overview + graph + trace replay on localhost:7878
+bellamem serve
 ```
 
-Every command except `save`, `emerge`, `prune --apply`, and `scrub` is
-read-only.
+All read-only except `save`. Write state is `.graph/v02.json` in the
+project root; caches are in a scratch dir under `$TMPDIR`.
 
 ---
 
@@ -323,21 +323,21 @@ losing the thread is packaged into four slash commands.
 ### Install the slash command — once, globally
 
 ```bash
-bellamem install-commands           # writes ~/.claude/commands/bellamem.md
+bellamem install           # writes ~/.claude/commands/bellamem.md
 ```
 
 `/bellamem` now works in **every** Claude Code project on your
-machine. Per-project install (`--project`) is also supported if you
-want to commit the slash command into a specific repo.
+machine. The template shells out to `bellamem $ARGUMENTS`, so whatever
+`bellamem` is on PATH is what the slash command invokes.
 
 ### The commands
 
 | Command | What it does |
 |---|---|
-| `/bellamem` or `/bellamem resume` | Working-memory replay tail + long-term expand pack + top surprises. Run at session start. |
-| `/bellamem save` | Ingest the current session (auto-consolidates), run audit, report top new surprises. Run before `/clear` or at end of day. |
+| `/bellamem` or `/bellamem resume` | Typed structural summary — invariants, open work, retracted approaches, recent decisions, disputes. Run at session start. |
+| `/bellamem save` | Ingest the current session into the graph. Run before `/clear` or at end of day. |
 | `/bellamem recall <topic>` | Mass-ranked beliefs about a topic, disputes included. Mid-session lookup. |
-| `/bellamem why <topic>` | Pre-edit pack: invariants, disputes, causes, entity bridges. Run before a risky change. |
+| `/bellamem why <topic>` | Pre-edit pack: invariants, disputes, causes, edge neighborhood. Run before a risky change. |
 | `/bellamem replay` / `/bellamem audit` | Raw CLI output when you want to look at it directly. |
 
 ### The save → clear → resume flow
@@ -350,10 +350,9 @@ want to commit the slash command into a specific repo.
 
 On a well-tuned project, `/bellamem resume` comes back in **~30k
 tokens** and contains enough to pick up the next decision without
-re-asking questions already answered. If it's much larger, run
-`bellamem emerge` to consolidate near-duplicates.
+re-asking questions already answered.
 
-### The edit guard (v0.0.4)
+### The edit guard
 
 Install `bellamem-guard` as a Claude Code **PreToolUse hook** and an
 advisory pack (invariants + disputes + causes for the focus) is
@@ -379,15 +378,18 @@ Hook registration (once per project) in `.claude/settings.json`:
 ```
 ~/.claude/commands/
   bellamem.md            installed once (global slash command)
+~/.config/bellamem/
+  .env                   user-level OPENAI_API_KEY (shared across projects)
 
 <your-project>/
   .claude/settings.json  PreToolUse hook registration (optional)
   .graph/
-    default.json          belief graph (gitignored by default)
-    default.emb.bin       belief embeddings, v3 binary sidecar
-    embed_cache.json      embedding cache (pruned to live beliefs on save)
-    llm_ew_cache.json     LLM EW cache (if BELLAMEM_EW=hybrid)
-  .env                    your API keys + embedder choice (never commit)
+    v02.json             the typed belief graph (gitignored by default)
+  .env                   per-project override (optional)
+
+$TMPDIR/bellamem-proto-tree/
+  proto-embed-cache.json classifier + embedding caches (shared across projects)
+  proto-llm-cache.json
 ```
 
 `.graph/` is gitignored by default.
@@ -558,35 +560,25 @@ is: Bella is the memory layer; the agent is still the window manager.
 
 ## Status
 
-**v0.1.0 — alpha, dogfooded on its own construction.** Bella was
-built in Claude Code sessions that were themselves ingested into the
-Bella being built. When the assistant drifted into an ad-hoc bandaid
-pattern during development, the user's correction landed in the graph
-as the highest-surprise belief of the session. That kind of
-self-observation is the point.
+**v0.3.0-alpha — Node/TypeScript port, dogfooded on its own
+construction.** The rewrite session that produced this codebase was
+ingested live into the graph it was building; every commit is
+sourced in per-turn provenance. The `trace` view (localhost web UI)
+lets you scrub through that session and watch concepts get born and
+ratified turn by turn.
 
-Since v0.0.2:
+The Python v0.2 reference is frozen at tag `v0.2.0-ref` and has been
+removed from master. The Node port produces byte-identical
+`.graph/v02.json`, validated by a diff harness run against the live
+567-concept graph on `resume`, `audit`, and `replay`.
 
-- **v0.0.3** — per-project `.graph/`, automatic R3 consolidation on
-  ingest, source grounding + narrative replay, structural pruning,
-  `bellamem save` default-to-current-session with incremental ingest,
-  and embed-cache prune bounded to live beliefs.
-- **v0.0.4rc1** — storage split: belief embeddings moved out of
-  `default.json` into a `default.emb.bin` sidecar (v3 format),
-  cutting non-vector operations' load time from ~2s to ~500ms.
-  `bellamem-guard` PreToolUse hook ships: advisory pack before
-  every edit, exit-2 block on dispute re-suggestions. Embedder
-  batching reduces save latency.
-- **v0.1.0** — log-odds decay gated on `BELLAMEM_DECAY=on`: on every
-  save, non-exempt beliefs fade exponentially toward the 0.5 prior at
-  a 30-day half-life (reserved fields, `mass_floor` pins, ⊥ disputes,
-  and ⇒ causes are exempt). New `bellamem decay` subcommand for
-  dry-run preview + `--apply`. v3 → v4 snapshot format adds a
-  `decayed_at` header. See the "Decay and reinforcement — the steady
-  state" section of THEORY.md for the collision math.
-- **v0.1.1 (planned)** — decay on by default after dogfood validates
-  the steady state, Three.js 3D viz with temporal replay, and
-  graph-backed compaction when the hook surface allows.
+- **v0.3.0-alpha** — TypeScript port, seven ops (resume/save/recall/why/ask/audit/replay),
+  `bellamem serve` localhost web UI with session trace replay,
+  `bellamem install` slash command writer, 51 vitest suites.
+- **v0.3.1 (planned)** — interactive ask in the web UI, 3D force
+  graph (Three.js), progressive walker mode, guard daemon.
+- **v0.4 (planned)** — log-odds decay on by default, schema evolution
+  for multi-graph views across projects.
 
 See [CHANGELOG.md](https://github.com/immartian/bellamem/blob/master/CHANGELOG.md) for details.
 
@@ -594,13 +586,19 @@ See [CHANGELOG.md](https://github.com/immartian/bellamem/blob/master/CHANGELOG.m
 
 ## Architecture
 
-`bellamem.core` (Jaynes accumulation, expand, audit, prune, replay)
-never imports from `bellamem.adapters` (Claude Code reader, LLM EW,
-turn-pair classifier). Core is domain-agnostic; adapters are where
-domain knowledge lives. Seven mutation operations, pluggable
-embedders, split snapshot storage.
+Everything lives in `packages/bellamem/` (Node/TypeScript). Core is
+`schema.ts` (Source/Concept/Edge + R1 mass) + `graph.ts` (container,
+dedup, R5 sweep) + `store.ts` (atomic JSON). The read surfaces are
+`walker.ts` (ask/recall/why), `audit.ts`, `resume.ts`, `replay.ts`.
+Writes flow through `ingest.ts` (streaming jsonl → classifier →
+`applyClassification`). The web UI is `server.ts` (Hono) + static
+shells under `web/`.
 
-Full file tree and invariants: **[ARCHITECTURE.md](https://github.com/immartian/bellamem/blob/master/ARCHITECTURE.md)**.
+Byte-compatible with the Python v0.2 reference — the `v0.2.0-ref`
+tag holds the frozen Python implementation that the current port
+was validated against.
+
+Full layout and invariants: **[ARCHITECTURE.md](https://github.com/immartian/bellamem/blob/master/ARCHITECTURE.md)**.
 
 ---
 
@@ -614,27 +612,26 @@ domain-agnostic case studies — lives in **[`bella/`](bella/)**:
 - **[EXAMPLES.md](bella/EXAMPLES.md)** — case studies (H. pylori, continental drift, …)
 - **[MEMORY.md](bella/MEMORY.md)** — how BELLA maps to LLM agent memory
 
-**[THEORY.md](THEORY.md)** covers the implementation side: how
-bellamem maps the BELLA spec to Python — thresholds, data structures,
-a worked flaky-test example with before/after diagrams, and the
-decay equilibrium math.
+The implementation spec — schema, R1 formula, classifier prompt
+(verbatim), cache keys, audit thresholds — is
+**[`docs/rewrite/v0.2-spec.md`](docs/rewrite/v0.2-spec.md)**. Any
+future port must implement against that contract.
 
 ---
 
 ## Contributing
 
-See [CONTRIBUTING.md](https://github.com/immartian/bellamem/blob/master/CONTRIBUTING.md). Short version:
+Short version:
 
-- The bench is the CI. Run `bellamem bench` after changes to EW,
-  expand, or audit and report the delta in the PR.
-- Add new embedders by implementing the `Embedder` protocol in
-  `core/embed.py`.
-- Add new EW logic in `adapters/`, never in `core/`.
-- Every PR that touches retrieval should include a bench item
-  demonstrating the failure mode it fixes.
-- Dogfood changes against Bella's own snapshot before shipping.
-  Unit tests prove code runs; running Bella against its own graph
-  proves the feature is useful.
+- `cd packages/bellamem && npm install && npm test` — 51 tests
+  covering schema, graph, audit, walker, resume, replay, round-trip.
+- `.graph/v02.json` is **frozen**. Any change to the schema,
+  `PROMPT_VERSION`, `DEDUP_COSINE`, R1 mass deltas, or audit
+  thresholds needs to land alongside a migration plan.
+- Dogfood changes against bellamem's own graph before shipping.
+  Unit tests prove code runs; `bellamem resume --graph ./graph/v02.json`
+  + `bellamem serve` prove the feature is useful.
+- Commit messages lead with *what changed*, then a brief *why*.
 
 ---
 

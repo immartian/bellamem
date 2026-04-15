@@ -1,10 +1,20 @@
-// bellamem overview page
+// bellamem overview page — project-scoped
+const PREFIX = location.pathname.match(/^\/p\/[^/]+/)?.[0] ?? "";
+
 async function load() {
   const [audit, graph, sessions] = await Promise.all([
-    fetch("/api/audit").then(r => r.json()),
-    fetch("/api/graph").then(r => r.json()),
-    fetch("/api/sessions").then(r => r.json()),
+    fetch(`${PREFIX}/api/audit`).then(r => r.json()),
+    fetch(`${PREFIX}/api/graph`).then(r => r.json()),
+    fetch(`${PREFIX}/api/sessions`).then(r => r.json()),
   ]);
+  if (audit.project) {
+    const crumb = document.createElement("a");
+    crumb.href = "/";
+    crumb.textContent = `← all projects · ${audit.project.label}`;
+    crumb.style.marginRight = "12px";
+    const nav = document.querySelector("header.topbar nav");
+    if (nav && !nav.querySelector(".crumb")) { crumb.className = "crumb"; nav.prepend(crumb); }
+  }
   render(audit, graph, sessions);
 }
 
@@ -74,7 +84,7 @@ function render(audit, graph, sessions) {
       <div class="title">${esc(s.session_id)}</div>
       <div class="n">${s.n_turns}t</div>
       <div class="muted">${s.n_concepts_touched} concepts · ${when}</div>
-      <div><a href="/trace?session=${encodeURIComponent(s.session_id)}">open trace →</a></div>
+      <div><a href="${PREFIX}/trace?session=${encodeURIComponent(s.session_id)}">open trace →</a></div>
     </div>`;
   }).join("");
 
@@ -106,9 +116,9 @@ function render(audit, graph, sessions) {
   `;
 }
 
-// Live reload via SSE
+// Live reload via SSE — project-scoped
 function connectWatch() {
-  const es = new EventSource("/api/watch");
+  const es = new EventSource(`${PREFIX}/api/watch`);
   es.addEventListener("reload", () => window.location.reload());
   es.onerror = () => { es.close(); setTimeout(connectWatch, 1500); };
 }
