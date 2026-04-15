@@ -4,6 +4,46 @@ All notable changes will be documented in this file. This project aims
 for [Semantic Versioning](https://semver.org). Until v1.0, everything
 is subject to change.
 
+## [0.3.1.2] — 2026-04-15 — Daemon replaces cron
+
+**Added**
+- `bellamem daemon start|stop|status|logs` — long-running background
+  process that serves the localhost web UI on port 7878 AND runs a
+  per-project save loop in-process. One process manages everything.
+  PID file at `~/.config/bellamem/daemon.pid`, log at
+  `~/.config/bellamem/daemon.log`.
+- `bellamem daemon logs --follow` tails the log like `tail -f`.
+- Save loop stagger (500ms per project) so OpenAI calls don't dogpile
+  on daemon start. Shared Embedder + TurnClassifier across projects
+  so sha256 caches stay warm. Default save interval: 5 minutes per
+  project. `--save-interval-minutes` override on start.
+- Tail window (default 200 turns) per save tick — critical for large
+  sessions like a 242 MB Claude Code jsonl where a full scan would
+  block the tick for minutes.
+
+**Removed**
+- `scripts/bellamem-dogfood-cron.sh` — retired. The daemon subsumes
+  the cron-based save loop. Users migrating from the Python era
+  should run `bellamem daemon start` and remove the cron line from
+  their crontab (`crontab -e` and delete the line referencing
+  `bellamem-dogfood-cron.sh`).
+
+**Fixed**
+- Web UI topbar nav links (`/overview`, `/graph`, `/trace`) 404'd
+  when clicked from inside a per-project view because the hardcoded
+  hrefs didn't carry the `/p/<id>/` prefix. Added `web/static/nav.js`
+  which rewrites the nav at page load and prepends a "← projects"
+  breadcrumb.
+- `bellamem daemon start` reports the correct URL even when the port
+  walker bumps off the default (previous behavior reported the
+  configured port, not the actually-bound one).
+- `resolveSessionJsonl` (used by `bellamem save`) now skips
+  metadata-only jsonls (file-history-snapshot) that would otherwise
+  win the mtime race against an active session.
+- `resolveSessionJsonl` previously used `require("node:fs")` inside
+  an ESM module, which silently threw and returned false for every
+  file, making `bellamem save` unreachable via the cron bridge.
+
 ## [0.3.0-alpha] — 2026-04-15 — Node/TypeScript rewrite
 
 Full port to TypeScript. Python v0.2 is frozen at tag `v0.2.0-ref`

@@ -221,14 +221,13 @@ Bella needs an OpenAI key for embeddings and LLM extraction. Three
 places it looks, in precedence order:
 
 1. **Shell environment** — `export OPENAI_API_KEY=sk-...` in `~/.bashrc`
-   or equivalent. Covers interactive CLI in any project; does **not**
-   cover cron jobs (cron doesn't source rc files).
+   or equivalent. Covers interactive CLI in any project.
 2. **Project `.env`** — at your git repo root. Per-project override
    when different projects need different keys. Gitignored.
 3. **User config** — `~/.config/bellamem/.env` on Linux, the native
-   equivalent on macOS and Windows (resolved via `platformdirs`).
-   **Recommended default:** set the key once, use bellamem in any
-   project, and cron jobs pick it up too.
+   equivalent on macOS and Windows (`env-paths`-resolved).
+   **Recommended default:** set the key once here, and both the CLI
+   and the background daemon pick it up automatically.
 
 First-time setup for most users:
 
@@ -248,7 +247,7 @@ Bella uses `gpt-4o-mini` for per-turn classification and
 by content hash — you pay once per unique turn or topic, never
 on re-runs. Caching is what makes the cost bounded.
 
-**Measured from this repo's dogfood cron** (running `bellamem save`
+**Measured from this repo's dogfood loop** (running `bellamem save`
 every 5 minutes on all new turns across ~6 days of active
 development): ~**$1.20 cumulative** across ~3,350 classified turns.
 That's about **3¢ per 100-turn session**, with embeddings
@@ -258,9 +257,10 @@ Cost is dominated entirely by LLM classification; the embedding
 bill is effectively free. The practical knobs if you want it even
 cheaper: (1) cache hits are free, so re-running `bellamem save` on
 the same transcript costs nothing — only *new* turns get classified;
-(2) the dogfood cron runs every 5 minutes, but nothing requires it
-— `bellamem save` is idempotent and can be called on demand (e.g.
-from a git hook, a timer, or manually).
+(2) the daemon ticks every 5 minutes by default, but
+`--save-interval-minutes` lets you stretch that arbitrarily, and
+`bellamem save` is idempotent and can be called on demand (e.g.
+from a git hook or manually) if you'd rather not run a daemon.
 
 **Requirements:** Node 20+. Git (Bella scopes per-project state via
 the git repo root). No other system dependencies.
@@ -282,6 +282,7 @@ audit, replay, and the web UI.
 | `bellamem audit` | *5 health signals over the graph* |
 | `bellamem replay` | *Chronological turn-by-turn view of the current session* |
 | `bellamem serve` | *Localhost web UI with session trace scrubber* |
+| `bellamem daemon start` | *Background service: save loop + web UI in one process* |
 
 ```bash
 # Ingest this project's most recent Claude Code session.
@@ -301,12 +302,26 @@ bellamem audit
 bellamem replay                                # tail of the current session
 bellamem replay --session 7e315796 --max-lines 30
 
-# Web UI — overview + graph + trace replay on localhost:7878
+# Web UI — foreground, ties up the terminal:
 bellamem serve
+
+# ...or the background daemon — one process serves the web UI
+# AND runs a save loop every 5 minutes for every project it finds:
+bellamem daemon start                # detached, PID at ~/.config/bellamem/daemon.pid
+bellamem daemon status               # "running · pid 12345 · uptime 42s"
+bellamem daemon logs --follow        # tail -f the daemon log
+bellamem daemon stop
 ```
 
 All read-only except `save`. Write state is `.graph/v02.json` in the
 project root; caches are in a scratch dir under `$TMPDIR`.
+
+The daemon is the recommended "run up bellamem" path: start it once
+at login (or from a shell rc line), and `/bellamem` in any Claude
+Code session reads a graph the daemon is keeping fresh in the
+background. The web UI at `http://localhost:7878` discovers every
+project on your machine that has a `.graph/v02.json` and presents
+them on a single home page — cross-project dashboards come free.
 
 ---
 
