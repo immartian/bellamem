@@ -236,6 +236,27 @@ chmod 600 ~/.config/bellamem/.env
 Project `.env.example` is still provided for projects that want
 explicit per-project config.
 
+### Cost
+
+Bella uses `gpt-4o-mini` for per-turn classification and
+`text-embedding-3-small` for topic embeddings. Both are cached
+by content hash — you pay once per unique turn or topic, never
+on re-runs. Caching is what makes the cost bounded.
+
+**Measured from this repo's dogfood cron** (running `bellamem save`
+every 5 minutes on all new turns across ~6 days of active
+development): ~**$1.20 cumulative** across ~3,350 classified turns.
+That's about **3¢ per 100-turn session**, with embeddings
+contributing rounding-error ($0.0003 for 2,600+ unique topics).
+
+Cost is dominated entirely by LLM classification; the embedding
+bill is effectively free. The practical knobs if you want it even
+cheaper: (1) cache hits are free, so re-running `bellamem save` on
+the same transcript costs nothing — only *new* turns get classified;
+(2) the dogfood cron runs every 5 minutes, but nothing requires it
+— `bellamem save` is idempotent and can be called on demand (e.g.
+from a git hook, a timer, or manually).
+
 **Requirements:** Python 3.10+. Git (Bella scopes per-project state via
 the git repo root). No other system dependencies.
 
