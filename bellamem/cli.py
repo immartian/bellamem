@@ -739,12 +739,14 @@ def cmd_save(args: argparse.Namespace) -> int:
         return 2
 
     # Find latest session jsonl. The claude-code projects dir encodes
-    # the cwd in its name — we walk the conventional location.
+    # the cwd in its name. Delegate to `adapters.claude_code.project_dir_for`
+    # so the encoding rule (every non-alphanumeric char → `-`, including
+    # underscores) stays in one place. The earlier inline `replace("/", "-")`
+    # missed underscores and silently looked at the wrong dir for any
+    # project whose path contained an underscore.
+    from .adapters.claude_code import project_dir_for
     cwd = Path(args.cwd or os.getcwd()).resolve()
-    claude_dir_name = "-" + str(cwd).replace("/", "-").lstrip("-")
-    claude_project_dir = (
-        Path.home() / ".claude" / "projects" / claude_dir_name
-    )
+    claude_project_dir = Path(project_dir_for(str(cwd)))
     if not claude_project_dir.is_dir():
         print(
             f"no Claude Code project dir found for {cwd}\n"
