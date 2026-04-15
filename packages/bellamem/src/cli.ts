@@ -1,5 +1,5 @@
 import { Command } from "commander";
-import { existsSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readdirSync, statSync, openSync, readSync, closeSync } from "node:fs";
 import { join, resolve } from "node:path";
 // `resolve` used below in the serve action
 import { tmpdir } from "node:os";
@@ -30,20 +30,42 @@ function cachePaths(): { embed: string; llm: string } {
   };
 }
 
+function jsonlHasSpeakerTurn(path: string, maxBytes: number = 64 * 1024): boolean {
+  // Cheap prefilter: does the file contain at least one user/assistant
+  // record? Fresh metadata-only jsonls (file-history-snapshot etc.)
+  // can win the mtime race against an active session and cause the
+  // cron to ingest nothing. Read the first chunk and grep.
+  try {
+    const fd = openSync(path, "r");
+    const buf = Buffer.alloc(maxBytes);
+    const n = readSync(fd, buf, 0, maxBytes, 0);
+    closeSync(fd);
+    const s = buf.subarray(0, n).toString("utf8");
+    return s.includes('"type":"user"') || s.includes('"type":"assistant"');
+  } catch {
+    return false;
+  }
+}
+
 function resolveSessionJsonl(root: string): string | null {
   // Find the most recently modified .jsonl under ~/.claude/projects/<encoded>/
+  // that actually contains speaker turns. Skip metadata-only files.
   const encoded = projectDirFor(resolve(root));
   if (!existsSync(encoded)) return null;
-  let best: { path: string; mtime: number } | null = null;
+  const candidates: Array<{ path: string; mtime: number }> = [];
   for (const name of readdirSync(encoded)) {
     if (!name.endsWith(".jsonl")) continue;
     const p = join(encoded, name);
     try {
       const st = statSync(p);
-      if (!best || st.mtimeMs > best.mtime) best = { path: p, mtime: st.mtimeMs };
+      candidates.push({ path: p, mtime: st.mtimeMs });
     } catch { /* skip */ }
   }
-  return best?.path ?? null;
+  candidates.sort((a, b) => b.mtime - a.mtime);
+  for (const c of candidates) {
+    if (jsonlHasSpeakerTurn(c.path)) return c.path;
+  }
+  return null;
 }
 
 export function buildProgram(): Command {
