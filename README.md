@@ -210,8 +210,31 @@ pip install 'bellamem[openai]'  # OpenAI
 pip install 'bellamem[all]'     # both
 ```
 
-Copy `.env.example` → `.env` in your project and fill in the backends
-you enabled. `.env` is gitignored.
+### Setting `OPENAI_API_KEY`
+
+Bella needs an OpenAI key for embeddings and LLM extraction. Three
+places it looks, in precedence order:
+
+1. **Shell environment** — `export OPENAI_API_KEY=sk-...` in `~/.bashrc`
+   or equivalent. Covers interactive CLI in any project; does **not**
+   cover cron jobs (cron doesn't source rc files).
+2. **Project `.env`** — at your git repo root. Per-project override
+   when different projects need different keys. Gitignored.
+3. **User config** — `~/.config/bellamem/.env` on Linux, the native
+   equivalent on macOS and Windows (resolved via `platformdirs`).
+   **Recommended default:** set the key once, use bellamem in any
+   project, and cron jobs pick it up too.
+
+First-time setup for most users:
+
+```bash
+mkdir -p ~/.config/bellamem
+echo 'OPENAI_API_KEY=sk-...' > ~/.config/bellamem/.env
+chmod 600 ~/.config/bellamem/.env
+```
+
+Project `.env.example` is still provided for projects that want
+explicit per-project config.
 
 **Requirements:** Python 3.10+. Git (Bella scopes per-project state via
 the git repo root). No other system dependencies.
