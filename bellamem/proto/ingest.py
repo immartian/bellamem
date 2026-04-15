@@ -77,6 +77,10 @@ def _derive_session_id(jsonl_path: Path, records: list[dict]) -> str:
 
     Falls back to the filename stem (first 8 chars) for non-
     claude-code sources that don't carry a sessionId.
+
+    Retained for backwards compatibility with any caller that
+    already has a list of records in hand. The streaming read path
+    in `read_session_turns` does its own pre-scan instead.
     """
     for rec in records:
         sid = rec.get("sessionId")
@@ -85,46 +89,91 @@ def _derive_session_id(jsonl_path: Path, records: list[dict]) -> str:
     return jsonl_path.stem[:8]
 
 
-def read_session_turns(jsonl_path: Path) -> list[Source]:
-    """Read a claude-code jsonl session and return Sources in order.
+def _scan_session_id(jsonl_path: Path, *, max_lines: int = 20) -> str:
+    """Cheap pre-scan for session_id from the first few jsonl lines.
+
+    Claude Code puts `sessionId` on every record, so the first
+    parseable line almost always hits. `max_lines=20` is a safe
+    ceiling — session metadata lives at the top of the file.
+    Falls back to the filename stem if no sessionId appears.
+    """
+    with jsonl_path.open("r", encoding="utf-8") as f:
+        for i, raw in enumerate(f):
+            if i >= max_lines:
+                break
+            try:
+                rec = json.loads(raw)
+            except Exception:
+                continue
+            sid = rec.get("sessionId")
+            if isinstance(sid, str) and sid:
+                return sid[:8]
+    return jsonl_path.stem[:8]
+
+
+def read_session_turns(
+    jsonl_path: Path,
+    *,
+    tail: Optional[int] = None,
+) -> list[Source]:
+    """Stream a Claude Code jsonl session and return Sources in order.
+
+    **Streams the file line-by-line** instead of slurping it into
+    memory. Claude Code sessions can grow to hundreds of megabytes
+    (tool-result blobs dominate), and the prior slurp-then-parse
+    path OOM-killed on any nontrivial long-running project. Only
+    Source objects are retained — raw records are dropped after the
+    type/content filter.
+
+    Args:
+        jsonl_path: path to the session jsonl
+        tail: if set, return only the last N speaker turns. Uses a
+            bounded deque internally so memory stays O(tail) even
+            for files too large to parse in full. Turn indices are
+            preserved from the original stream.
 
     Skips tool-use notifications and bracketed system messages.
-    Each turn gets a 0-based turn_idx counted only among accepted
-    speaker turns (not raw file line numbers). session_id is
-    derived from jsonl contents (stable across filename changes).
     """
-    lines = jsonl_path.read_text().splitlines()
-    records: list[dict] = []
-    for line in lines:
-        try:
-            records.append(json.loads(line))
-        except Exception:
-            continue
+    from collections import deque
 
-    session_id = _derive_session_id(jsonl_path, records)
+    session_id = _scan_session_id(jsonl_path)
 
-    turns: list[Source] = []
+    container: "deque[Source] | list[Source]"
+    if tail is not None and tail > 0:
+        container = deque(maxlen=tail)
+    else:
+        container = []
+
     idx = 0
-    for rec in records:
-        t = rec.get("type")
-        if t not in ("user", "assistant"):
-            continue
-        text = _extract_turn_text(rec).strip()
-        if not text:
-            continue
-        # Skip bracketed system messages (tool-use notifications etc.)
-        if text.startswith("<") and ">" in text[:120]:
-            continue
-        turns.append(Source(
-            session_id=session_id,
-            file_path=str(jsonl_path),
-            speaker=t,
-            turn_idx=idx,
-            text=text[:MAX_TURN_CHARS],
-            timestamp=_parse_timestamp(rec.get("timestamp")),
-        ))
-        idx += 1
-    return turns
+    with jsonl_path.open("r", encoding="utf-8") as f:
+        for raw in f:
+            line = raw.rstrip("\n")
+            if not line:
+                continue
+            try:
+                rec = json.loads(line)
+            except Exception:
+                continue
+            t = rec.get("type")
+            if t not in ("user", "assistant"):
+                continue
+            text = _extract_turn_text(rec).strip()
+            if not text:
+                continue
+            # Skip bracketed system messages (tool-use notifications etc.)
+            if text.startswith("<") and ">" in text[:120]:
+                continue
+            container.append(Source(
+                session_id=session_id,
+                file_path=str(jsonl_path),
+                speaker=t,
+                turn_idx=idx,
+                text=text[:MAX_TURN_CHARS],
+                timestamp=_parse_timestamp(rec.get("timestamp")),
+            ))
+            idx += 1
+
+    return list(container)
 
 
 # ---------------------------------------------------------------------------
@@ -310,15 +359,23 @@ def ingest_session(
     on_progress: Optional[Callable[[int, int, int, int], None]] = None,
     save_every: int = 25,
     save_to: Optional[Path] = None,
+    tail: Optional[int] = None,
 ) -> dict:
-    """Ingest every turn of a session jsonl into the graph.
+    """Ingest turns from a session jsonl into the graph.
 
     Periodic cache flushes + optional intermediate graph saves so
     long runs can be interrupted and resumed (next run hits cache).
 
+    Args:
+        tail: if set, only ingest the last N speaker turns. Pushed
+            down into `read_session_turns` so memory stays O(tail)
+            — important for first-run ingest against multi-hundred-MB
+            Claude Code jsonls that otherwise OOM the slurp-then-parse
+            path.
+
     Returns a stats dict.
     """
-    turns = read_session_turns(jsonl_path)
+    turns = read_session_turns(jsonl_path, tail=tail)
     processed: list[Source] = []
     stats = {
         "total_turns": len(turns),
@@ -362,13 +419,18 @@ def ingest_session(
         apply_classification(graph, turn, result, embedder)
         processed.append(turn)
 
+        # Per-turn progress tick so long runs show movement from turn 1.
+        # Gating this on save_every hid the first 25 turns behind a
+        # wall of silence, which on cold-cache first-run ingest against
+        # a large session looked indistinguishable from a hang.
+        if on_progress is not None:
+            on_progress(i + 1, len(graph.concepts), len(graph.edges), stats["llm_calls"])
+
         if (i + 1) % save_every == 0:
             embedder.save()
             classifier.save()
             if save_to is not None:
                 save_graph(graph, save_to)
-            if on_progress is not None:
-                on_progress(i + 1, len(graph.concepts), len(graph.edges), stats["llm_calls"])
 
     embedder.save()
     classifier.save()

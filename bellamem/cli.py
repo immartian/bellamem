@@ -787,6 +787,7 @@ def cmd_save(args: argparse.Namespace) -> int:
         graph, latest,
         embedder=embedder, classifier=classifier,
         on_progress=_progress, save_every=25, save_to=graph_path,
+        tail=getattr(args, "tail", None),
     )
     save_graph(graph, graph_path)
 
