@@ -635,6 +635,30 @@ Short version:
 
 ---
 
+## Credits
+
+**Built with [Claude Code](https://claude.com/claude-code).** Bella is
+primarily an AI-collaborative project. The
+[BELLA specification](bella/SPEC.md) and the
+[Recursive Emergence framework](https://github.com/Recursive-Emergence/RE)
+are [Isaac Mao](https://github.com/immartian)'s independent research;
+the Python and TypeScript implementations are heavily co-written with
+Claude across long multi-month sessions. Commits made from inside
+Claude Code carry the standard `Co-Authored-By: Claude
+<noreply@anthropic.com>` trailer.
+
+Most distinctively, **Bella dogfoods itself**. Every design decision,
+dispute, and causal chain from Bella's own development lives in Bella's
+own belief graph — the same graph anyone else's Claude Code sessions
+would write to. When a new session starts with `/bellamem resume`,
+Claude Code is loading Bella's memory of what Bella already decided,
+across hundreds of prior turns and dozens of prior sessions. The
+recursive loop is the project's strongest field test: Bella and Claude
+Code co-developed each other, and the graph is the record of that
+collaboration.
+
+---
+
 ## License
 
 AGPL-3.0-or-later. See [LICENSE](https://github.com/immartian/bellamem/blob/master/LICENSE).

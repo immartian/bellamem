@@ -16,6 +16,7 @@ import { replayText } from "./replay.js";
 import { ConceptClass } from "./schema.js";
 import { startServer } from "./server.js";
 import { runInstall } from "./install.js";
+import { daemonStart, daemonStop, daemonStatus, daemonLogPath, daemonIsRunning } from "./daemon.js";
 
 function scratchDir(): string {
   const d = join(tmpdir(), "bellamem-proto-tree");
@@ -245,9 +246,92 @@ export function buildProgram(): Command {
       console.log("  Restart Claude Code and try /bellamem in a project.");
     });
 
+  const daemon = program.command("daemon").description("Manage the background daemon (web UI + auto-save)");
+  daemon
+    .command("start")
+    .description("Start the daemon in the background")
+    .option("--port <n>", "port to bind (default 7878)", (v) => parseInt(v, 10))
+    .option("--save-interval-minutes <n>", "save loop cadence per project (default 5)", (v) => parseFloat(v))
+    .action(async (opts: { port?: number; saveIntervalMinutes?: number }) => {
+      loadEnv();
+      const result = await daemonStart({
+        port: opts.port,
+        saveIntervalMinutes: opts.saveIntervalMinutes,
+      });
+      if (result.already) {
+        console.log(`daemon already running (pid ${result.pid}) → ${result.url}`);
+      } else {
+        console.log(`daemon started (pid ${result.pid}) → ${result.url}`);
+        console.log(`logs: ${daemonLogPath()}`);
+      }
+    });
+  daemon
+    .command("stop")
+    .description("Stop the daemon")
+    .action(() => {
+      const result = daemonStop();
+      if (!result.stopped && result.pid === undefined) {
+        console.log("daemon not running");
+      } else if (!result.stopped) {
+        console.log(`daemon pid ${result.pid} was not alive; cleaned pid file`);
+      } else {
+        console.log(`daemon stopped (was pid ${result.pid})`);
+      }
+    });
+  daemon
+    .command("status")
+    .description("Report daemon status")
+    .action(() => {
+      const s = daemonStatus();
+      if (!s.running) {
+        console.log("not running");
+        return;
+      }
+      console.log(`running · pid ${s.pid}${s.uptime_s !== undefined ? ` · uptime ${s.uptime_s}s` : ""}`);
+      console.log(`logs: ${daemonLogPath()}`);
+    });
+  daemon
+    .command("logs")
+    .description("Tail the daemon log")
+    .option("-f, --follow", "follow new log output")
+    .option("-n, --lines <n>", "show last N lines (default 40)", (v) => parseInt(v, 10))
+    .action(async (opts: { follow?: boolean; lines?: number }) => {
+      const fsMod = await import("node:fs");
+      const path = daemonLogPath();
+      if (!fsMod.existsSync(path)) {
+        console.log(`no log yet at ${path}`);
+        return;
+      }
+      const lines = opts.lines ?? 40;
+      const raw = fsMod.readFileSync(path, "utf8").split("\n");
+      const tail = raw.slice(-lines).join("\n");
+      process.stdout.write(tail);
+      if (!tail.endsWith("\n")) process.stdout.write("\n");
+      if (opts.follow) {
+        let size = fsMod.statSync(path).size;
+        const timer = setInterval(() => {
+          try {
+            const st = fsMod.statSync(path);
+            if (st.size > size) {
+              const fd = fsMod.openSync(path, "r");
+              const buf = Buffer.alloc(st.size - size);
+              fsMod.readSync(fd, buf, 0, st.size - size, size);
+              fsMod.closeSync(fd);
+              process.stdout.write(buf.toString("utf8"));
+              size = st.size;
+            } else if (st.size < size) {
+              size = 0;  // file rotated
+            }
+          } catch {}
+        }, 400);
+        process.on("SIGINT", () => { clearInterval(timer); process.exit(0); });
+        await new Promise(() => {});
+      }
+    });
+
   program
     .command("serve")
-    .description("Start the localhost web UI (global multi-project by default)")
+    .description("Start the localhost web UI in the foreground (use `daemon start` for background)")
     .option("--port <n>", "port to bind (default 7878)", (v) => parseInt(v, 10))
     .option("--graph <path>", "pin to a single graph instead of discovering projects")
     .option("--no-open", "do not launch the browser on start")

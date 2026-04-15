@@ -1,6 +1,8 @@
 // bellamem force-directed graph view — project-scoped
 // Depends on global d3 (loaded from CDN in graph.html)
+import { rewriteNavLinks } from "./nav.js";
 const PREFIX = location.pathname.match(/^\/p\/[^/]+/)?.[0] ?? "";
+rewriteNavLinks();
 
 const CLASS_COLORS = {
   invariant: "#7cc4ff",

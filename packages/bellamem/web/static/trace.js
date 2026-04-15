@@ -1,5 +1,7 @@
 // bellamem session trace — turn-by-turn replay, project-scoped
+import { rewriteNavLinks } from "./nav.js";
 const PREFIX = location.pathname.match(/^\/p\/[^/]+/)?.[0] ?? "";
+rewriteNavLinks();
 
 function esc(s) {
   return String(s).replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));

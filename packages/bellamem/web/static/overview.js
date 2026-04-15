@@ -1,5 +1,7 @@
 // bellamem overview page — project-scoped
+import { rewriteNavLinks } from "./nav.js";
 const PREFIX = location.pathname.match(/^\/p\/[^/]+/)?.[0] ?? "";
+rewriteNavLinks();
 
 async function load() {
   const [audit, graph, sessions] = await Promise.all([
