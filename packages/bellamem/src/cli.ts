@@ -110,6 +110,12 @@ export function buildProgram(): Command {
       }
 
       // Per-project advisory lock. Lock file sits next to the graph.
+      // Ensure the .graph/ directory exists first — on first-run the
+      // graph file (and its parent dir) may not exist yet, and
+      // proper-lockfile can't create the .lock file without the dir.
+      const { mkdirSync } = await import("node:fs");
+      const { dirname } = await import("node:path");
+      mkdirSync(dirname(graphPath), { recursive: true });
       const lockTarget = graphPath;
       let release: (() => Promise<void>) | null = null;
       try {
