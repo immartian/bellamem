@@ -12,6 +12,7 @@ import { askText } from "./walker.js";
 import { Embedder } from "./clients.js";
 import { ConceptClass } from "./schema.js";
 import { listSessions, sessionTrace, massHistogram, replayMassHistory } from "./trace.js";
+import { buildHorizon } from "./horizon.js";
 import { discoverProjects, ProjectEntry } from "./registry.js";
 import { graphPathFor, projectRoot } from "./paths.js";
 
@@ -236,6 +237,19 @@ export async function startServer(opts: ServerOptions = {}): Promise<ServerHandl
     });
   });
 
+  app.get("/p/:pid/api/horizon", (c) => {
+    const p = needProject(c);
+    if (!p) return c.json({ error: "project not found" }, 404);
+    const minMass = parseFloat(c.req.query("min_mass") ?? "0.55");
+    const maxConcepts = parseInt(c.req.query("max_concepts") ?? "80", 10);
+    const g = loadGraph(p.graphPath);
+    const data = buildHorizon(g, {
+      minMass: Number.isFinite(minMass) ? minMass : 0.55,
+      maxConcepts: Number.isFinite(maxConcepts) ? maxConcepts : 80,
+    });
+    return c.json(data);
+  });
+
   app.post("/p/:pid/api/ask", async (c) => {
     const p = needProject(c);
     if (!p) return c.json({ error: "project not found" }, 404);
@@ -302,6 +316,7 @@ export async function startServer(opts: ServerOptions = {}): Promise<ServerHandl
   app.get("/p/:pid/overview", () => shell("overview"));
   app.get("/p/:pid/graph",    () => shell("graph"));
   app.get("/p/:pid/trace",    () => shell("trace"));
+  app.get("/p/:pid/horizon",  () => shell("horizon"));
 
   app.get("/static/:file", async (c) => {
     const path = join(webDir, "static", c.req.param("file"));

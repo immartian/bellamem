@@ -18,7 +18,7 @@ export function rewriteNavLinks() {
   for (const a of nav.querySelectorAll("a")) {
     const href = a.getAttribute("href");
     if (!href) continue;
-    if (href === "/overview" || href === "/graph" || href === "/trace") {
+    if (href === "/overview" || href === "/graph" || href === "/trace" || href === "/horizon") {
       a.setAttribute("href", prefix + href);
     }
   }

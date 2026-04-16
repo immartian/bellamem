@@ -57,6 +57,7 @@ async function load() {
           <a href="/p/${encoded}/overview">overview</a>
           <a href="/p/${encoded}/graph">graph</a>
           <a href="/p/${encoded}/trace">trace</a>
+          <a href="/p/${encoded}/horizon">horizon</a>
         </div>
       </div>`;
   }).join("");

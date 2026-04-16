@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>bellamem — horizon</title>
+<link rel="stylesheet" href="/static/app.css">
+<style>
+  .horizon-wrap { overflow-x: auto; overflow-y: auto; max-height: calc(100vh - 180px); }
+  svg.horizon { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; }
+  .stratum-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; fill: var(--fg-dim); }
+  .lane-label { font-size: 10px; fill: var(--fg); cursor: pointer; }
+  .lane-label:hover { fill: var(--accent); }
+  .lane-bg { fill: var(--panel-2); rx: 2; }
+  .lane-bg.retracted, .lane-bg.consumed { opacity: 0.4; }
+  .event-dot { stroke: var(--bg); stroke-width: 0.8; cursor: pointer; }
+  .arc { fill: none; stroke-width: 1.4; opacity: 0.7; }
+  .arc.cause { stroke: var(--fg); }
+  .arc.elaborate { stroke: var(--invariant); }
+  .arc.dispute { stroke: var(--dispute); stroke-dasharray: 5 3; }
+  .arc.retract { stroke: var(--dispute); stroke-dasharray: 2 3; }
+  .arc.support { stroke: var(--support); stroke-width: 0.8; opacity: 0.4; }
+  .session-band { fill: var(--panel-2); opacity: 0.25; }
+  .session-band:nth-child(odd) { opacity: 0; }
+  .tooltip {
+    position: fixed; pointer-events: none; background: var(--panel);
+    border: 1px solid var(--border); border-radius: 4px; padding: 8px 10px;
+    font-size: 11px; max-width: 320px; z-index: 100; display: none;
+  }
+</style>
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">bellamem</div>
+  <nav>
+    <a href="/overview">overview</a>
+    <a href="/graph">graph</a>
+    <a href="/trace">trace</a>
+    <a href="/horizon" class="active">horizon</a>
+  </nav>
+  <div class="spacer"></div>
+  <div class="stats" id="topstats">loading…</div>
+</header>
+<main>
+  <div class="controls">
+    <label>min mass <input id="min-mass" type="range" min="0.5" max="0.9" step="0.01" value="0.55"></label>
+    <label>max concepts <input id="max-concepts" type="number" min="10" max="300" value="80" style="width:60px"></label>
+    <span class="muted" id="meta"></span>
+  </div>
+  <div class="horizon-wrap">
+    <svg class="horizon" id="svg"></svg>
+  </div>
+  <div class="tooltip" id="tooltip"></div>
+</main>
+<script type="module" src="/static/horizon.js"></script>
+</body>
+</html>
