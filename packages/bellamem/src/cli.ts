@@ -164,6 +164,13 @@ export function buildProgram(): Command {
         console.log(`concepts:   ${graph.concepts.size}`);
         console.log(`edges:      ${graph.edges.size}`);
         console.log(`elapsed:    ${stats.elapsedS.toFixed(1)}s`);
+        console.log(`output:     ${graphPath}`);
+        // Hint about the web UI.
+        if (daemonIsRunning()) {
+          console.log(`\nweb ui:     http://localhost:7878  (daemon running)`);
+        } else {
+          console.log(`\nweb ui:     run 'bellamem daemon start' or 'bellamem serve'`);
+        }
       } finally {
         if (release) await release();
       }
@@ -243,13 +250,18 @@ export function buildProgram(): Command {
       } else {
         console.log(`  kept  ${result.slashCommandPath}  (use --force to overwrite)`);
       }
+      if (result.aliasWritten) {
+        console.log(`  wrote ${result.aliasPath}  (/bella alias)`);
+      } else {
+        console.log(`  kept  ${result.aliasPath}`);
+      }
       if (result.envWritten) {
         console.log(`  wrote ${result.envPath}  (add OPENAI_API_KEY to enable ingest)`);
       } else {
         console.log(`  kept  ${result.envPath}`);
       }
       console.log();
-      console.log("  Restart Claude Code and try /bellamem in a project.");
+      console.log("  Restart Claude Code and try /bella in a project.");
     });
 
   const daemon = program.command("daemon").description("Manage the background daemon (web UI + auto-save)");

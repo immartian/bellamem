@@ -5,6 +5,7 @@
   "type": "module",
   "bin": {
     "bellamem": "./dist/bin/bellamem.js",
+    "bella": "./dist/bin/bellamem.js",
     "bellamem-guard": "./dist/bin/bellamem-guard.js"
   },
   "main": "./dist/src/index.js",

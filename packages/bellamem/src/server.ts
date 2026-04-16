@@ -83,8 +83,17 @@ export async function startServer(opts: ServerOptions = {}): Promise<ServerHandl
     projects = await discoverProjects();
   }
 
-  const projectsById = new Map<string, ProjectEntry>();
+  let projectsById = new Map<string, ProjectEntry>();
   for (const p of projects) projectsById.set(p.id, p);
+
+  /** Re-scan projects. Called on /api/projects and when a
+   *  /p/:pid route misses the current map. Cheap — reads dirs. */
+  const refreshProjects = async () => {
+    if (pinned) return; // pinned mode doesn't re-discover
+    projects = await discoverProjects();
+    projectsById = new Map();
+    for (const p of projects) projectsById.set(p.id, p);
+  };
 
   // Request log
   app.use("*", async (c, next) => {
@@ -106,7 +115,8 @@ export async function startServer(opts: ServerOptions = {}): Promise<ServerHandl
   // Home + global endpoints
   // -------------------------------------------------------------------------
 
-  app.get("/api/projects", (c) => {
+  app.get("/api/projects", async (c) => {
+    await refreshProjects();
     return c.json(projects.map(p => {
       // Cheap snapshot: load graph, compute the small summary for the
       // home page. For ~4-20 projects this is fast enough; cache if it
@@ -147,29 +157,33 @@ export async function startServer(opts: ServerOptions = {}): Promise<ServerHandl
   // Per-project API — /p/:pid/api/...
   // -------------------------------------------------------------------------
 
-  const needProject = (c: any): ProjectEntry | null => {
+  const needProject = async (c: any): Promise<ProjectEntry | null> => {
     const pid = c.req.param("pid");
-    const p = projectFromReq(pid);
-    if (!p) return null;
-    return p;
+    let p = projectFromReq(pid);
+    if (!p) {
+      // Project not in cache — maybe it was created after daemon start.
+      await refreshProjects();
+      p = projectFromReq(pid);
+    }
+    return p ?? null;
   };
 
-  app.get("/p/:pid/api/graph", (c) => {
-    const p = needProject(c);
+  app.get("/p/:pid/api/graph", async (c) => {
+    const p = await needProject(c);
     if (!p) return c.json({ error: "project not found" }, 404);
     const g = loadGraph(p.graphPath);
     return c.json(g.toJSON());
   });
 
-  app.get("/p/:pid/api/resume", (c) => {
-    const p = needProject(c);
+  app.get("/p/:pid/api/resume", async (c) => {
+    const p = await needProject(c);
     if (!p) return c.text("project not found", 404);
     const g = loadGraph(p.graphPath);
     return c.text(resumeText(g));
   });
 
-  app.get("/p/:pid/api/audit", (c) => {
-    const p = needProject(c);
+  app.get("/p/:pid/api/audit", async (c) => {
+    const p = await needProject(c);
     if (!p) return c.json({ error: "project not found" }, 404);
     const g = loadGraph(p.graphPath);
     const r = audit(g);
@@ -180,15 +194,15 @@ export async function startServer(opts: ServerOptions = {}): Promise<ServerHandl
     });
   });
 
-  app.get("/p/:pid/api/sessions", (c) => {
-    const p = needProject(c);
+  app.get("/p/:pid/api/sessions", async (c) => {
+    const p = await needProject(c);
     if (!p) return c.json({ error: "project not found" }, 404);
     const g = loadGraph(p.graphPath);
     return c.json(listSessions(g));
   });
 
-  app.get("/p/:pid/api/session/:sid/trace", (c) => {
-    const p = needProject(c);
+  app.get("/p/:pid/api/session/:sid/trace", async (c) => {
+    const p = await needProject(c);
     if (!p) return c.json({ error: "project not found" }, 404);
     const sid = c.req.param("sid");
     const g = loadGraph(p.graphPath);
@@ -197,8 +211,8 @@ export async function startServer(opts: ServerOptions = {}): Promise<ServerHandl
     return c.json(tr);
   });
 
-  app.get("/p/:pid/api/concept/:cid", (c) => {
-    const p = needProject(c);
+  app.get("/p/:pid/api/concept/:cid", async (c) => {
+    const p = await needProject(c);
     if (!p) return c.json({ error: "project not found" }, 404);
     const cid = c.req.param("cid");
     const g = loadGraph(p.graphPath);
@@ -237,8 +251,8 @@ export async function startServer(opts: ServerOptions = {}): Promise<ServerHandl
     });
   });
 
-  app.get("/p/:pid/api/horizon", (c) => {
-    const p = needProject(c);
+  app.get("/p/:pid/api/horizon", async (c) => {
+    const p = await needProject(c);
     if (!p) return c.json({ error: "project not found" }, 404);
     const minMass = parseFloat(c.req.query("min_mass") ?? "0.55");
     const maxConcepts = parseInt(c.req.query("max_concepts") ?? "80", 10);
@@ -251,7 +265,7 @@ export async function startServer(opts: ServerOptions = {}): Promise<ServerHandl
   });
 
   app.post("/p/:pid/api/ask", async (c) => {
-    const p = needProject(c);
+    const p = await needProject(c);
     if (!p) return c.json({ error: "project not found" }, 404);
     const body = (await c.req.json().catch(() => ({}))) as {
       query?: string; classFilter?: ConceptClass;
@@ -281,8 +295,8 @@ export async function startServer(opts: ServerOptions = {}): Promise<ServerHandl
     }),
   );
 
-  app.get("/p/:pid/api/watch", (c) => {
-    const p = needProject(c);
+  app.get("/p/:pid/api/watch", async (c) => {
+    const p = await needProject(c);
     if (!p) return c.json({ error: "project not found" }, 404);
     const pid = p.id;
     return streamSSE(c, async (stream) => {

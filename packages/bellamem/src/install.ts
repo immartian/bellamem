@@ -78,20 +78,33 @@ export const ENV_TEMPLATE = `# bellamem user config — keys resolved in this or
 export interface InstallResult {
   slashCommandPath: string;
   slashCommandWritten: boolean;
+  aliasPath: string;
+  aliasWritten: boolean;
   envPath: string;
   envWritten: boolean;
 }
 
 export function runInstall(opts: { force?: boolean } = {}): InstallResult {
-  const slashPath = join(homedir(), ".claude", "commands", "bellamem.md");
+  const cmdDir = join(homedir(), ".claude", "commands");
+  const slashPath = join(cmdDir, "bellamem.md");
+  const aliasPath = join(cmdDir, "bella.md");
   const envPath = userConfigEnvPath();
+
+  mkdirSync(cmdDir, { recursive: true });
 
   const slashExists = existsSync(slashPath);
   let slashWritten = false;
   if (!slashExists || opts.force) {
-    mkdirSync(dirname(slashPath), { recursive: true });
     writeFileSync(slashPath, SLASH_COMMAND_TEMPLATE, "utf8");
     slashWritten = true;
+  }
+
+  // /bella alias — same template, preferred short form.
+  const aliasExists = existsSync(aliasPath);
+  let aliasWritten = false;
+  if (!aliasExists || opts.force) {
+    writeFileSync(aliasPath, SLASH_COMMAND_TEMPLATE, "utf8");
+    aliasWritten = true;
   }
 
   const envExists = existsSync(envPath);
@@ -102,5 +115,5 @@ export function runInstall(opts: { force?: boolean } = {}): InstallResult {
     envWritten = true;
   }
 
-  return { slashCommandPath: slashPath, slashCommandWritten: slashWritten, envPath, envWritten };
+  return { slashCommandPath: slashPath, slashCommandWritten: slashWritten, aliasPath, aliasWritten, envPath, envWritten };
 }
