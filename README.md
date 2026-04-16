@@ -189,7 +189,7 @@ concept drawer is available at `http://localhost:7878/p/<project>/graph`.
 
 ```bash
 npm install -g bellamem
-bellamem install                 # writes ~/.claude/commands/bellamem.md
+bellamem install                 # writes ~/.claude/commands/bella.md
 ```
 
 **npx (no global install)** — ephemeral, but the slash command still
@@ -207,12 +207,13 @@ git clone https://github.com/immartian/bellamem
 cd bellamem/packages/bellamem
 npm install
 npm run build
-node dist/bin/bellamem.js install
+node dist/bin/bellamem.js install   # or: bella install
 ```
 
 `bellamem install` writes:
-- `~/.claude/commands/bellamem.md` — the `/bellamem` Claude Code slash
+- `~/.claude/commands/bella.md` — the `/bella` Claude Code slash
   command, shelling out to the `bellamem` binary on PATH.
+  (Removes the legacy `/bellamem` command if present.)
 - `~/.config/bellamem/.env` — a template with `OPENAI_API_KEY` commented
   out. Fill it in to enable ingest.
 
@@ -318,7 +319,7 @@ All read-only except `save`. Write state is `.graph/v02.json` in the
 project root; caches are in a scratch dir under `$TMPDIR`.
 
 The daemon is the recommended "run up bellamem" path: start it once
-at login (or from a shell rc line), and `/bellamem` in any Claude
+at login (or from a shell rc line), and `/bella` in any Claude
 Code session reads a graph the daemon is keeping fresh in the
 background. The web UI at `http://localhost:7878` discovers every
 project on your machine that has a `.graph/v02.json` and presents
@@ -339,10 +340,10 @@ losing the thread is packaged into four slash commands.
 ### Install the slash command — once, globally
 
 ```bash
-bellamem install           # writes ~/.claude/commands/bellamem.md
+bellamem install           # writes ~/.claude/commands/bella.md
 ```
 
-`/bellamem` now works in **every** Claude Code project on your
+`/bella` now works in **every** Claude Code project on your
 machine. The template shells out to `bellamem $ARGUMENTS`, so whatever
 `bellamem` is on PATH is what the slash command invokes.
 
@@ -350,11 +351,11 @@ machine. The template shells out to `bellamem $ARGUMENTS`, so whatever
 
 | Command | What it does |
 |---|---|
-| `/bellamem` or `/bellamem resume` | Typed structural summary — invariants, open work, retracted approaches, recent decisions, disputes. Run at session start. |
-| `/bellamem save` | Ingest the current session into the graph. Run before `/clear` or at end of day. |
-| `/bellamem recall <topic>` | Mass-ranked beliefs about a topic, disputes included. Mid-session lookup. |
-| `/bellamem why <topic>` | Pre-edit pack: invariants, disputes, causes, edge neighborhood. Run before a risky change. |
-| `/bellamem replay` / `/bellamem audit` | Raw CLI output when you want to look at it directly. |
+| `/bella` or `/bella resume` | Typed structural summary — invariants, open work, retracted approaches, recent decisions, disputes. Run at session start. |
+| `/bella save` | Ingest the current session into the graph. Run before `/clear` or at end of day. |
+| `/bella recall <topic>` | Mass-ranked beliefs about a topic, disputes included. Mid-session lookup. |
+| `/bella why <topic>` | Pre-edit pack: invariants, disputes, causes, edge neighborhood. Run before a risky change. |
+| `/bella replay` / `/bella audit` | Raw CLI output when you want to look at it directly. |
 
 ### The save → clear → resume flow
 

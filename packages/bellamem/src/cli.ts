@@ -243,17 +243,15 @@ export function buildProgram(): Command {
     .command("install")
     .description("Install Claude Code /bellamem slash command + user config template")
     .option("--force", "overwrite existing slash command file")
-    .action((opts: { force?: boolean }) => {
-      const result = runInstall({ force: opts.force });
+    .action(async (opts: { force?: boolean }) => {
+      const result = await runInstall({ force: opts.force });
       if (result.slashCommandWritten) {
         console.log(`  wrote ${result.slashCommandPath}`);
       } else {
         console.log(`  kept  ${result.slashCommandPath}  (use --force to overwrite)`);
       }
-      if (result.aliasWritten) {
-        console.log(`  wrote ${result.aliasPath}  (/bella alias)`);
-      } else {
-        console.log(`  kept  ${result.aliasPath}`);
+      if (result.legacyRemoved) {
+        console.log(`  removed /bellamem (retired — use /bella)`);
       }
       if (result.envWritten) {
         console.log(`  wrote ${result.envPath}  (add OPENAI_API_KEY to enable ingest)`);

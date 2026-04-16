@@ -78,16 +78,15 @@ export const ENV_TEMPLATE = `# bellamem user config — keys resolved in this or
 export interface InstallResult {
   slashCommandPath: string;
   slashCommandWritten: boolean;
-  aliasPath: string;
-  aliasWritten: boolean;
+  legacyRemoved: boolean;
   envPath: string;
   envWritten: boolean;
 }
 
-export function runInstall(opts: { force?: boolean } = {}): InstallResult {
+export async function runInstall(opts: { force?: boolean } = {}): Promise<InstallResult> {
   const cmdDir = join(homedir(), ".claude", "commands");
-  const slashPath = join(cmdDir, "bellamem.md");
-  const aliasPath = join(cmdDir, "bella.md");
+  const slashPath = join(cmdDir, "bella.md");
+  const legacyPath = join(cmdDir, "bellamem.md");
   const envPath = userConfigEnvPath();
 
   mkdirSync(cmdDir, { recursive: true });
@@ -99,12 +98,12 @@ export function runInstall(opts: { force?: boolean } = {}): InstallResult {
     slashWritten = true;
   }
 
-  // /bella alias — same template, preferred short form.
-  const aliasExists = existsSync(aliasPath);
-  let aliasWritten = false;
-  if (!aliasExists || opts.force) {
-    writeFileSync(aliasPath, SLASH_COMMAND_TEMPLATE, "utf8");
-    aliasWritten = true;
+  // Retire /bellamem — delete the legacy command if present.
+  let legacyRemoved = false;
+  if (existsSync(legacyPath)) {
+    const { unlinkSync } = await import("node:fs");
+    unlinkSync(legacyPath);
+    legacyRemoved = true;
   }
 
   const envExists = existsSync(envPath);
@@ -115,5 +114,5 @@ export function runInstall(opts: { force?: boolean } = {}): InstallResult {
     envWritten = true;
   }
 
-  return { slashCommandPath: slashPath, slashCommandWritten: slashWritten, aliasPath, aliasWritten, envPath, envWritten };
+  return { slashCommandPath: slashPath, slashCommandWritten: slashWritten, legacyRemoved, envPath, envWritten };
 }
