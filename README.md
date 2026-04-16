@@ -174,11 +174,12 @@ each cell differently.
 You can see the full ontology rendered live on your own graph:
 
 ```bash
-python -m bellamem.proto viz              # .graph/v02.html (interactive)
+bellamem serve                            # localhost:7878, graph view
 ```
 
 Shape encodes class, color encodes nature, node size encodes
-mass, turn-hubs make the hypergraph structure visible as rosettes.
+mass. The D3 force-directed graph view with session coloring and
+concept drawer is available at `http://localhost:7878/p/<project>/graph`.
 
 ---
 
@@ -457,7 +458,7 @@ structure that flat context can't preserve.*
 
 ## Empirical results
 
-Latest measurement: [benchmarks/v0.0.4rc1.md](https://github.com/immartian/bellamem/blob/master/benchmarks/v0.0.4rc1.md)
+Latest measurement: [benchmarks/v0.0.4rc1.md](https://github.com/immartian/bellamem/blob/v0.2.0-ref/benchmarks/v0.0.4rc1.md)
 (2026-04-10, budget = 1200 tokens, LLM judge enabled, 13-item
 hand-labeled corpus, 1834-belief forest).
 
@@ -472,25 +473,25 @@ avg tokens used           1200          602         1161         1143          9
 
 `flat_tail (0%) < compact (8%) < rag_topk (31%) < before_edit (69%) < expand (92%)`.
 
-**Headline story — compare to [v0.0.2](https://github.com/immartian/bellamem/blob/master/benchmarks/v0.0.2.md):** as
+**Headline story — compare to [v0.0.2](https://github.com/immartian/bellamem/blob/v0.2.0-ref/benchmarks/v0.0.2.md):** as
 the forest grew from the v0.0.2 dogfood snapshot to 1834 beliefs,
 `rag_topk` collapsed from 85% → 31% LLM judge (cosine top-k pulls up
 more plausible-looking-but-wrong neighbors in a larger forest), while
 `expand` held at 92%. The gap from `expand` to the next-best contender
 widened from **15pp to 61pp**. Structured mass-weighted retrieval
 scales with forest size; cosine top-k doesn't. The retrieval code
-path (`core/expand.py`, `core/bella.py`) is unchanged between v0.0.2
+path (the v0.2 walker) is unchanged between v0.0.2
 and v0.0.4rc1 — every delta is a property of forest growth, not
 algorithm changes.
 
-See [benchmarks/README.md](https://github.com/immartian/bellamem/blob/master/benchmarks/README.md) for the versioning
+See [benchmarks/README.md](https://github.com/immartian/bellamem/blob/v0.2.0-ref/benchmarks/README.md) for the versioning
 convention and when to re-run.
 
 ### Compression at scale — 15 real Claude Code projects
 
 The bench above answers *"is `expand` accurate?"* The next question
 is *"how many tokens does Bella actually save?"* For that, the
-[`docs/scenarios.md`](https://github.com/immartian/bellamem/blob/master/docs/scenarios.md)
+[`docs/scenarios.md`](https://github.com/immartian/bellamem/blob/v0.2.0-ref/docs/scenarios.md)
 harness measures real Claude Code session transcripts sampled from
 **15 different projects** on a developer's machine — news monorepos,
 IRB documents, refactoring sessions, agent prototypes, marketing
@@ -524,9 +525,7 @@ conversations under ~200 tokens; the per-belief overhead dominates."*
 Above that, Bella pays off, and the longer the session, the more it
 saves.
 
-Sources are anonymised; only aggregate metrics are pinned. The
-measurement script lives in `docs/scenarios.py` for anyone who wants
-to reproduce on their own `~/.claude/projects/`.
+Sources are anonymised; only aggregate metrics are pinned.
 
 ---
 
