@@ -1,4 +1,5 @@
 // bellamem horizon — time × structure event horizon view
+// Labels inside bars, auto-fit width, no horizontal scroll.
 import { rewriteNavLinks } from "./nav.js";
 const PREFIX = location.pathname.match(/^\/p\/[^/]+/)?.[0] ?? "";
 rewriteNavLinks();
@@ -16,14 +17,13 @@ const ARC_COLORS = {
   retract:   "#ff7a7a",
   support:   "#6ef0c2",
 };
-const LANE_H = 22;
-const LANE_PAD = 3;
-const EVENT_R = 4;
-const LEFT_MARGIN = 220;
-const TOP_MARGIN = 40;
-const TURN_W = 8;
-const STRATA_GAP = 18;
-const STRATA_LABEL_H = 16;
+const LANE_H = 30;
+const LANE_GAP = 4;
+const STRATA_GAP = 14;
+const STRATA_LABEL_H = 18;
+const PAD_LEFT = 12;
+const PAD_TOP = 10;
+const PAD_RIGHT = 12;
 
 function esc(s) {
   return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[c]);
@@ -51,113 +51,164 @@ function render(data) {
 
   if (data.lanes.length === 0) {
     svg.setAttribute("width", "400");
-    svg.setAttribute("height", "100");
-    const t = document.createElementNS("http://www.w3.org/2000/svg", "text");
-    t.setAttribute("x", "20"); t.setAttribute("y", "50");
-    t.setAttribute("fill", "#8a90a6"); t.textContent = "no concepts above the mass threshold";
-    svg.appendChild(t);
+    svg.setAttribute("height", "80");
+    addText(svg, 20, 40, "no concepts above the mass threshold", "#8a90a6", 12);
     return;
   }
 
-  // Compute layout dimensions.
-  const maxTurn = data.timeline.length;
-  const strataGroups = groupByStrata(data.lanes, data.strata_order);
+  // --- Compute active turns (turns that have at least one event) ---
+  // Map each active turn to a dense X index so gaps compress.
+  const activeTurns = new Set();
+  for (const lane of data.lanes) {
+    for (const ev of lane.events) activeTurns.add(ev.turn_idx);
+  }
+  const sorted = [...activeTurns].sort((a, b) => a - b);
+  // Insert gap markers: if two consecutive active turns are far apart,
+  // add a fractional spacing proportional to the gap (capped).
+  const denseX = new Map();
+  let dx = 0;
+  for (let i = 0; i < sorted.length; i++) {
+    denseX.set(sorted[i], dx);
+    if (i + 1 < sorted.length) {
+      const gap = sorted[i + 1] - sorted[i];
+      dx += gap > 10 ? 2 : 1; // compress large gaps to 2 units
+    }
+  }
+  const maxDx = dx || 1;
 
-  // Y positions: strata header → lanes within each stratum.
-  let y = TOP_MARGIN;
-  const laneY = new Map();  // concept_id → y center
-  const strataY = [];       // [{label, y, height}]
+  // Auto-fit: scale X so the content fills the viewport width.
+  const wrap = document.querySelector(".horizon-wrap");
+  const viewW = (wrap ? wrap.clientWidth : 1200) - PAD_LEFT - PAD_RIGHT - 20;
+  const TURN_PX = Math.max(3, viewW / maxDx);
+
+  const xOf = (turnIdx) => {
+    const d = denseX.get(turnIdx);
+    return PAD_LEFT + (d !== undefined ? d : 0) * TURN_PX;
+  };
+
+  // --- Y layout: strata → lanes ---
+  const strataGroups = new Map();
+  for (const l of data.lanes) {
+    if (!strataGroups.has(l.class)) strataGroups.set(l.class, []);
+    strataGroups.get(l.class).push(l);
+  }
+
+  let y = PAD_TOP;
+  const laneY = new Map();
+  const strataY = [];
 
   for (const stratum of data.strata_order) {
     const group = strataGroups.get(stratum);
     if (!group || group.length === 0) continue;
-    strataY.push({ label: stratum, y, height: group.length * (LANE_H + LANE_PAD) + STRATA_LABEL_H + STRATA_GAP });
+    strataY.push({ label: stratum, y });
     y += STRATA_LABEL_H;
     for (const lane of group) {
-      laneY.set(lane.concept_id, y + LANE_H / 2);
-      y += LANE_H + LANE_PAD;
+      laneY.set(lane.concept_id, y);
+      y += LANE_H + LANE_GAP;
     }
     y += STRATA_GAP;
   }
 
-  const totalW = LEFT_MARGIN + maxTurn * TURN_W + 40;
+  const totalW = PAD_LEFT + maxDx * TURN_PX + PAD_RIGHT;
   const totalH = y + 20;
-  svg.setAttribute("width", String(totalW));
+  svg.setAttribute("width", String(Math.max(totalW, viewW + PAD_LEFT + PAD_RIGHT)));
   svg.setAttribute("height", String(totalH));
-  svg.setAttribute("viewBox", `0 0 ${totalW} ${totalH}`);
-
-  const xOf = (turnIdx) => LEFT_MARGIN + turnIdx * TURN_W;
 
   // --- Session boundary bands ---
+  // Map session boundaries to dense X space.
   const bandGroup = mkG(svg, "session-bands");
   for (let i = 0; i < data.session_boundaries.length; i++) {
-    const start = data.session_boundaries[i];
-    const end = i + 1 < data.session_boundaries.length
+    const rawStart = data.session_boundaries[i];
+    const rawEnd = i + 1 < data.session_boundaries.length
       ? data.session_boundaries[i + 1]
-      : maxTurn;
+      : data.timeline.length;
+    // Find the nearest dense-X position for start/end.
+    const sx = nearestDenseX(sorted, denseX, rawStart) * TURN_PX + PAD_LEFT;
+    const ex = nearestDenseX(sorted, denseX, rawEnd) * TURN_PX + PAD_LEFT;
     if (i % 2 === 0) {
-      const rect = mkRect(bandGroup, xOf(start), TOP_MARGIN - 10,
-        (end - start) * TURN_W, totalH - TOP_MARGIN, "session-band");
-      rect.setAttribute("data-session", data.timeline[start]?.session_id ?? "");
+      addRect(bandGroup, sx, PAD_TOP, ex - sx, totalH - PAD_TOP - 20,
+        "rgba(30,35,55,0.35)", 0);
     }
   }
 
   // --- Strata headers ---
   for (const s of strataY) {
-    const t = mkText(svg, 8, s.y + 11, s.label, "stratum-label");
+    addText(svg, PAD_LEFT, s.y + 12, s.label.toUpperCase(), "#8a90a6", 10, "bold");
+    // Thin separator line.
+    const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+    line.setAttribute("x1", PAD_LEFT); line.setAttribute("x2", totalW - PAD_RIGHT);
+    line.setAttribute("y1", s.y + STRATA_LABEL_H - 2);
+    line.setAttribute("y2", s.y + STRATA_LABEL_H - 2);
+    line.setAttribute("stroke", "#262b3d"); line.setAttribute("stroke-width", "1");
+    svg.appendChild(line);
   }
 
-  // --- Lanes ---
+  // --- Concept bars (lanes) ---
   const lanesGroup = mkG(svg, "lanes");
   for (const lane of data.lanes) {
-    const cy = laneY.get(lane.concept_id);
-    if (cy === undefined) continue;
+    const ly = laneY.get(lane.concept_id);
+    if (ly === undefined) continue;
     const color = CLASS_COLORS[lane.class] ?? "#888";
+    const isDead = lane.state === "retracted" || lane.state === "consumed";
 
-    // Lane background bar from birth to death (or end).
+    // Bar from birth to death/end.
     const x1 = xOf(lane.birth_turn);
     const x2 = lane.death_turn !== null
-      ? xOf(lane.death_turn) + TURN_W
-      : totalW - 20;
-    const isDead = lane.state === "retracted" || lane.state === "consumed";
-    const bg = mkRect(lanesGroup, x1, cy - LANE_H / 2 + 1, x2 - x1, LANE_H - 2,
-      `lane-bg${isDead ? " " + lane.state : ""}`);
-    bg.setAttribute("fill-opacity", String(0.08 + lane.final_mass * 0.15));
+      ? xOf(lane.death_turn) + TURN_PX
+      : totalW - PAD_RIGHT;
+    const barW = Math.max(60, x2 - x1); // min width so label fits
 
-    // Lane label on the left.
-    const label = mkText(lanesGroup, 8, cy + 4,
-      truncate(lane.topic, 28), "lane-label");
-    label.setAttribute("fill", color);
-    label.setAttribute("data-cid", lane.concept_id);
+    // Bar background.
+    const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+    rect.setAttribute("x", x1);
+    rect.setAttribute("y", ly);
+    rect.setAttribute("width", barW);
+    rect.setAttribute("height", LANE_H);
+    rect.setAttribute("rx", "4");
+    rect.setAttribute("fill", color);
+    rect.setAttribute("fill-opacity", isDead ? "0.08" : String(0.1 + lane.final_mass * 0.12));
+    rect.setAttribute("stroke", color);
+    rect.setAttribute("stroke-opacity", isDead ? "0.15" : "0.3");
+    rect.setAttribute("stroke-width", "1");
+    if (isDead) rect.setAttribute("stroke-dasharray", "3 3");
+    lanesGroup.appendChild(rect);
+
+    // Label INSIDE the bar.
+    const maxLabelW = barW - 50; // leave room for mass badge
+    const labelText = truncate(lane.topic, Math.floor(maxLabelW / 6.5));
+    const label = addText(lanesGroup, x1 + 6, ly + LANE_H / 2 + 4,
+      labelText, color, 11);
+    label.style.cursor = "pointer";
     label.onclick = () => openConcept(lane.concept_id);
 
-    // Mass badge.
-    mkText(lanesGroup, LEFT_MARGIN - 35, cy + 4,
-      lane.final_mass.toFixed(2), "lane-label").setAttribute("fill", "#8a90a6");
+    // Mass badge at right end of bar.
+    addText(lanesGroup, x1 + barW - 38, ly + LANE_H / 2 + 4,
+      lane.final_mass.toFixed(2), "#8a90a6", 10);
 
-    // Citation event dots.
-    for (const ev of lane.events) {
-      const cx = xOf(ev.turn_idx);
-      const r = EVENT_R + ev.mass_delta * 30; // bigger delta = bigger dot
-      const dot = mkCircle(lanesGroup, cx, cy, Math.max(2.5, Math.min(7, r)),
-        "event-dot");
-      dot.setAttribute("fill", color);
-      dot.setAttribute("fill-opacity", String(0.5 + ev.mass_after * 0.5));
-      if (ev.voice_is_new) {
-        dot.setAttribute("stroke", "#fff");
-        dot.setAttribute("stroke-width", "1.5");
-      }
-      dot.onmouseenter = (e) => showTooltip(e, lane, ev, data.timeline[ev.turn_idx]);
-      dot.onmouseleave = hideTooltip;
+    // State badge for dead lanes.
+    if (isDead) {
+      const badge = lane.state === "retracted" ? "✕" : "●";
+      addText(lanesGroup, x1 + barW - 12, ly + LANE_H / 2 + 4,
+        badge, "#ff7a7a", 11);
     }
 
-    // Death marker.
-    if (isDead && lane.death_turn !== null) {
-      const dx = xOf(lane.death_turn);
-      const marker = mkText(lanesGroup, dx + 2, cy + 4,
-        lane.state === "retracted" ? "✕" : "●", "");
-      marker.setAttribute("fill", "#ff7a7a");
-      marker.setAttribute("font-size", "11");
+    // Citation event dots along the TOP edge of the bar.
+    for (const ev of lane.events) {
+      const cx = xOf(ev.turn_idx);
+      const cy_dot = ly + 4;
+      const r = 3 + ev.mass_delta * 25;
+      const dot = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+      dot.setAttribute("cx", cx);
+      dot.setAttribute("cy", cy_dot);
+      dot.setAttribute("r", String(Math.max(2, Math.min(6, r))));
+      dot.setAttribute("fill", color);
+      dot.setAttribute("fill-opacity", String(0.6 + ev.mass_after * 0.4));
+      dot.setAttribute("stroke", ev.voice_is_new ? "#fff" : "#0f1115");
+      dot.setAttribute("stroke-width", ev.voice_is_new ? "1.5" : "0.5");
+      dot.style.cursor = "pointer";
+      dot.onmouseenter = (e) => showTooltip(e, lane, ev, data.timeline[ev.turn_idx]);
+      dot.onmouseleave = hideTooltip;
+      lanesGroup.appendChild(dot);
     }
   }
 
@@ -169,47 +220,46 @@ function render(data) {
     if (y1 === undefined || y2 === undefined) continue;
     const x1 = xOf(arc.from_turn);
     const x2 = xOf(arc.to_turn);
-    if (x1 === x2 && y1 === y2) continue; // self-arc, skip
+    if (x1 === x2 && y1 === y2) continue;
 
-    // Bezier control point: arc curves away from the midpoint.
-    // For cause edges (which reach back in time), curve upward.
-    // For dispute edges, curve outward from the lane midpoint.
+    // Offset Y to top/bottom of the bar depending on direction.
+    const fy = arc.type === "cause" || arc.type === "elaborate" ? y1 : y1 + LANE_H;
+    const ty = arc.type === "cause" || arc.type === "elaborate" ? y2 : y2 + LANE_H;
+
     const mx = (x1 + x2) / 2;
-    const my = (y1 + y2) / 2;
-    const spread = Math.min(60, Math.abs(x2 - x1) * 0.3 + 15);
-    const cy_ctrl = arc.type === "cause" || arc.type === "elaborate"
-      ? my - spread    // curve upward
-      : my + spread;   // curve downward for dispute/retract
+    const my = (fy + ty) / 2;
+    const spread = Math.min(50, Math.abs(x2 - x1) * 0.25 + 12);
+    const cpY = arc.type === "cause" || arc.type === "elaborate"
+      ? Math.min(fy, ty) - spread
+      : Math.max(fy, ty) + spread;
 
     const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-    path.setAttribute("d", `M ${x1} ${y1} Q ${mx} ${cy_ctrl} ${x2} ${y2}`);
-    path.setAttribute("class", `arc ${arc.type}`);
+    path.setAttribute("d", `M ${x1} ${fy} Q ${mx} ${cpY} ${x2} ${ty}`);
+    path.setAttribute("fill", "none");
     path.setAttribute("stroke", ARC_COLORS[arc.type] ?? "#666");
-
-    // Arrow marker at the target end.
-    const angle = Math.atan2(y2 - cy_ctrl, x2 - mx);
-    const aLen = 6;
-    const ax1 = x2 - aLen * Math.cos(angle - 0.4);
-    const ay1 = y2 - aLen * Math.sin(angle - 0.4);
-    const ax2 = x2 - aLen * Math.cos(angle + 0.4);
-    const ay2 = y2 - aLen * Math.sin(angle + 0.4);
-
-    const arrow = document.createElementNS("http://www.w3.org/2000/svg", "path");
-    arrow.setAttribute("d", `M ${ax1} ${ay1} L ${x2} ${y2} L ${ax2} ${ay2}`);
-    arrow.setAttribute("stroke", ARC_COLORS[arc.type] ?? "#666");
-    arrow.setAttribute("stroke-width", "1.2");
-    arrow.setAttribute("fill", "none");
-    arrow.setAttribute("class", `arc ${arc.type}`);
-
+    path.setAttribute("stroke-width", "1.3");
+    path.setAttribute("opacity", "0.65");
+    if (arc.type === "dispute") path.setAttribute("stroke-dasharray", "5 3");
+    if (arc.type === "retract") path.setAttribute("stroke-dasharray", "2 3");
     arcsGroup.appendChild(path);
+
+    // Arrowhead.
+    const angle = Math.atan2(ty - cpY, x2 - mx);
+    const aL = 5;
+    const arrow = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    arrow.setAttribute("d",
+      `M ${x2 - aL * Math.cos(angle - 0.4)} ${ty - aL * Math.sin(angle - 0.4)} ` +
+      `L ${x2} ${ty} ` +
+      `L ${x2 - aL * Math.cos(angle + 0.4)} ${ty - aL * Math.sin(angle + 0.4)}`);
+    arrow.setAttribute("stroke", ARC_COLORS[arc.type] ?? "#666");
+    arrow.setAttribute("stroke-width", "1.1");
+    arrow.setAttribute("fill", "none");
+    arrow.setAttribute("opacity", "0.65");
     arcsGroup.appendChild(arrow);
 
-    // Dispute X marker at midpoint.
+    // Dispute midpoint marker.
     if (arc.type === "dispute") {
-      const xm = mkText(arcsGroup, mx - 5, my + 4, "⊥", "");
-      xm.setAttribute("fill", "#ff7a7a");
-      xm.setAttribute("font-size", "12");
-      xm.setAttribute("font-weight", "bold");
+      addText(arcsGroup, mx - 4, (fy + cpY) / 2 + 4, "⊥", "#ff7a7a", 11, "bold");
     }
   }
 }
@@ -218,16 +268,28 @@ function render(data) {
 // Helpers
 // ---------------------------------------------------------------------------
 
-function groupByStrata(lanes, order) {
-  const map = new Map();
-  for (const l of lanes) {
-    if (!map.has(l.class)) map.set(l.class, []);
-    map.get(l.class).push(l);
+function nearestDenseX(sorted, denseX, rawIdx) {
+  // Binary search for the closest active turn.
+  let lo = 0, hi = sorted.length - 1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (sorted[mid] === rawIdx) return denseX.get(sorted[mid]) ?? 0;
+    if (sorted[mid] < rawIdx) lo = mid + 1; else hi = mid - 1;
   }
-  return map;
+  // Return the nearest.
+  const candidates = [];
+  if (lo < sorted.length) candidates.push(sorted[lo]);
+  if (hi >= 0) candidates.push(sorted[hi]);
+  let best = 0, bestDist = Infinity;
+  for (const c of candidates) {
+    const d = Math.abs(c - rawIdx);
+    if (d < bestDist) { bestDist = d; best = denseX.get(c) ?? 0; }
+  }
+  return best;
 }
 
 function truncate(s, n) {
+  if (n < 4) return s.slice(0, 1) + "…";
   return s.length > n ? s.slice(0, n - 1) + "…" : s;
 }
 
@@ -238,27 +300,23 @@ function mkG(parent, cls) {
   return g;
 }
 
-function mkRect(parent, x, y, w, h, cls) {
+function addRect(parent, x, y, w, h, fill, opacity) {
   const r = document.createElementNS("http://www.w3.org/2000/svg", "rect");
   r.setAttribute("x", x); r.setAttribute("y", y);
   r.setAttribute("width", Math.max(0, w)); r.setAttribute("height", Math.max(0, h));
-  if (cls) r.setAttribute("class", cls);
+  r.setAttribute("fill", fill ?? "none");
+  if (opacity !== undefined) r.setAttribute("opacity", String(opacity));
   parent.appendChild(r);
   return r;
 }
 
-function mkCircle(parent, cx, cy, r, cls) {
-  const c = document.createElementNS("http://www.w3.org/2000/svg", "circle");
-  c.setAttribute("cx", cx); c.setAttribute("cy", cy); c.setAttribute("r", r);
-  if (cls) c.setAttribute("class", cls);
-  parent.appendChild(c);
-  return c;
-}
-
-function mkText(parent, x, y, text, cls) {
+function addText(parent, x, y, text, fill, size, weight) {
   const t = document.createElementNS("http://www.w3.org/2000/svg", "text");
   t.setAttribute("x", x); t.setAttribute("y", y);
-  if (cls) t.setAttribute("class", cls);
+  t.setAttribute("fill", fill ?? "#e6e8ee");
+  t.setAttribute("font-size", String(size ?? 12));
+  t.setAttribute("font-family", "ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace");
+  if (weight) t.setAttribute("font-weight", weight);
   t.textContent = text;
   parent.appendChild(t);
   return t;
@@ -271,10 +329,9 @@ function showTooltip(event, lane, ev, timelineEntry) {
     : `turn ${ev.turn_idx}`;
   tip.innerHTML = `
     <div><b>${esc(lane.topic)}</b></div>
-    <div class="muted">${lane.class}/${lane.nature}${lane.state ? " · " + lane.state : ""}</div>
-    <div>mass: ${ev.mass_after.toFixed(3)}${ev.mass_delta > 0 ? ` (+${ev.mass_delta.toFixed(3)})` : ""}</div>
-    <div>${ev.voice_is_new ? "★ new voice" : ""} [${ev.speaker}]</div>
-    <div class="muted">${when} · session ${timelineEntry?.session_id ?? "?"}</div>
+    <div style="color:#8a90a6">${lane.class}/${lane.nature}${lane.state ? " · " + lane.state : ""}</div>
+    <div>mass: ${ev.mass_after.toFixed(3)}${ev.mass_delta > 0 ? ` <span style="color:#9cf196">(+${ev.mass_delta.toFixed(3)})</span>` : ""}</div>
+    <div>${ev.voice_is_new ? "★ new voice · " : ""}${ev.speaker} · ${when}</div>
   `;
   tip.style.display = "block";
   tip.style.left = (event.clientX + 12) + "px";
@@ -289,14 +346,12 @@ async function openConcept(cid) {
   const url = `${PREFIX}/api/concept/${encodeURIComponent(cid)}`;
   const d = await fetch(url).then(r => r.json());
   if (d.error) return;
-  // Simple alert-style popup — reuse drawer from graph view if we had
-  // it, but for now a focused view.
-  const w = window.open("", "_blank", "width=500,height=600");
-  if (!w) return;
   const c = d.concept;
   const hist = d.mass_history.map(h =>
     `${h.source_id} [${h.speaker}] ${h.mass_before.toFixed(2)}→${h.mass_after.toFixed(2)}${h.voice_is_new ? " ★" : ""}`
   ).join("\n");
+  const w = window.open("", "_blank", "width=500,height=600");
+  if (!w) return;
   w.document.title = c.topic;
   w.document.body.style.cssText = "background:#0f1115;color:#e6e8ee;font:12px/1.6 monospace;padding:16px";
   w.document.body.innerHTML = `
