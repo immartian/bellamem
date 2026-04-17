@@ -19,8 +19,20 @@ if (process.env.BELLAMEM_DAEMON_CHILD === "1") {
     process.exit(1);
   });
 } else {
+  // Default to `resume` when no subcommand is given, so `/bella`
+  // with no args shows the graph resume instead of help text.
+  const args = [...process.argv];
+  const sub = args[2];
+  const knownSubs = [
+    "resume", "save", "ask", "recall", "why", "audit", "replay",
+    "install", "daemon", "serve", "help", "--help", "-h", "-V", "--version",
+  ];
+  if (!sub || (!knownSubs.includes(sub) && !sub.startsWith("-"))) {
+    // No subcommand or unrecognized first arg — inject "resume".
+    args.splice(2, 0, "resume");
+  }
   const program = buildProgram();
-  program.parseAsync(process.argv).catch((err) => {
+  program.parseAsync(args).catch((err) => {
     console.error(err);
     process.exit(1);
   });
