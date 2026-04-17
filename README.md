@@ -4,11 +4,11 @@
 
 **~~RAG retrieves documents.~~ Agents need to retrieve beliefs.**
 
-> Bella is the visual brand; the Node package and CLI are `bellamem`.
-> `npx bellamem install`, then `bellamem save`. **v0.3.0-alpha** is a
-> TypeScript port of the v0.2 Python reference — byte-compatible on
-> `.graph/v02.json`, plus a **localhost web UI** (`bellamem serve`)
-> with a session trace replay view that Python never had.
+> **[`npm install -g bellamem`](https://www.npmjs.com/package/bellamem)**,
+> then `bellamem install && bellamem daemon start`. Use `/bella` in
+> any Claude Code session. The daemon auto-saves your graph every 5
+> minutes and serves a **localhost web UI** with a session trace
+> replay view at `http://localhost:7878`.
 
 ---
 
@@ -185,37 +185,37 @@ concept drawer is available at `http://localhost:7878/p/<project>/graph`.
 
 ## Install
 
-**npm (global)** — one command on PATH:
-
 ```bash
-npm install -g bellamem
-bellamem install                 # writes ~/.claude/commands/bella.md
+npm install -g bellamem            # one binary: bellamem (+ bella alias)
+bellamem install                   # writes /bella slash command for Claude Code
+bellamem daemon start              # web UI + auto-save loop, one process
 ```
 
-**npx (no global install)** — ephemeral, but the slash command still
-needs a one-time write:
+That's it. Three commands, then `/bella` works in every Claude Code
+session on your machine and `http://localhost:7878` shows the
+multi-project dashboard.
+
+**npx (no global install):**
 
 ```bash
-npx bellamem install
-npx bellamem save
+npx bellamem install               # one-time slash command write
+npx bellamem save                  # on-demand save (no daemon)
 ```
 
-**From source (this repo)**:
+**From source:**
 
 ```bash
 git clone https://github.com/immartian/bellamem
 cd bellamem/packages/bellamem
-npm install
-npm run build
-node dist/bin/bellamem.js install   # or: bella install
+npm install && npm run build
+bellamem install
 ```
 
 `bellamem install` writes:
 - `~/.claude/commands/bella.md` — the `/bella` Claude Code slash
-  command, shelling out to the `bellamem` binary on PATH.
-  (Removes the legacy `/bellamem` command if present.)
-- `~/.config/bellamem/.env` — a template with `OPENAI_API_KEY` commented
-  out. Fill it in to enable ingest.
+  command. (Removes the legacy `/bellamem` command if present.)
+- `~/.config/bellamem/.env` — a template with `OPENAI_API_KEY`
+  commented out. Fill it in to enable ingest.
 
 ### Setting `OPENAI_API_KEY`
 
