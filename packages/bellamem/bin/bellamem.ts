@@ -24,7 +24,7 @@ if (process.env.BELLAMEM_DAEMON_CHILD === "1") {
   const args = [...process.argv];
   const sub = args[2];
   const knownSubs = [
-    "resume", "save", "ask", "recall", "why", "audit", "replay",
+    "resume", "save", "ask", "recall", "why", "audit", "replay", "evidence",
     "install", "daemon", "serve", "help", "--help", "-h", "-V", "--version",
   ];
   if (!sub || (!knownSubs.includes(sub) && !sub.startsWith("-"))) {

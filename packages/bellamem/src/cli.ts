@@ -13,7 +13,8 @@ import { resumeText } from "./resume.js";
 import { askText } from "./walker.js";
 import { audit, formatAudit } from "./audit.js";
 import { replayText } from "./replay.js";
-import { ConceptClass } from "./schema.js";
+import { gatherEvidence, formatEvidence } from "./evidence.js";
+import { Concept, ConceptClass } from "./schema.js";
 import { startServer } from "./server.js";
 import { runInstall } from "./install.js";
 import { daemonStart, daemonStop, daemonStatus, daemonLogPath, daemonIsRunning } from "./daemon.js";
@@ -212,6 +213,43 @@ export function buildProgram(): Command {
     .description("Cause-surfaced walk for a topic")
     .option("--graph <path>", "path to v0.2 graph JSON")
     .action(askAction);
+
+  program
+    .command("evidence <query>")
+    .description("Show the full provenance chain for a concept — every turn that cited it, with original text")
+    .option("--graph <path>", "path to v0.2 graph JSON")
+    .option("--max-text <n>", "max chars of turn text to show (default 500)", (v) => parseInt(v, 10))
+    .action(async (query: string, opts: { graph?: string; maxText?: number }) => {
+      loadEnv();
+      const root = projectRoot();
+      const graphPath = opts.graph ?? graphPathFor(root);
+      const graph = loadGraph(graphPath);
+      if (graph.concepts.size === 0) {
+        console.error("graph is empty");
+        process.exit(1);
+      }
+      // Find concept by substring match on topic, best by mass.
+      const q = query.toLowerCase();
+      const matches: Concept[] = [];
+      for (const c of graph.concepts.values()) {
+        if (c.topic.toLowerCase().includes(q)) matches.push(c);
+      }
+      if (matches.length === 0) {
+        console.error(`no concepts matching "${query}"`);
+        process.exit(1);
+      }
+      matches.sort((a, b) => b.mass - a.mass);
+      const target = matches[0]!;
+      if (matches.length > 1) {
+        console.error(`${matches.length} matches — showing highest mass: "${target.topic}"`);
+        for (const m of matches.slice(1, 5)) {
+          console.error(`  also: "${m.topic}" m=${m.mass.toFixed(2)}`);
+        }
+        console.error("");
+      }
+      const ev = await gatherEvidence(graph, target);
+      console.log(formatEvidence(ev, opts.maxText ?? 500));
+    });
 
   program
     .command("audit")
