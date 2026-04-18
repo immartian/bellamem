@@ -51,6 +51,15 @@ sections), and which approaches have already been rejected (⊥ disputes
 and retract edges). If the CAUSE edges are fragmented, say so honestly —
 don't invent a chain that isn't in the graph.
 
+**If \`$0\` is \`evidence\`**: The output is a provenance chain — every turn
+that cited the concept, with the EXACT file path and line number in
+the session jsonl. ALWAYS preserve the \`file:line\` references in your
+synthesis — they are the point of this command. Format each citation as:
+  turn #N [speaker] at file:line — what was said (one sentence summary)
+  mass X → Y (+delta)
+The user wants to JUMP TO these locations. Do not summarize away the
+line numbers.
+
 **If \`$0\` is \`replay\` or \`audit\`**: The raw output above is sufficient.
 Comment briefly only if something jumps out (a new entropy signal, an
 unexpected line, a belief that contradicts your working understanding).
