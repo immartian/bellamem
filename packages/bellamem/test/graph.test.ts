@@ -74,6 +74,22 @@ describe("Graph.findSimilarConcept — DEDUP_COSINE=0.78", () => {
     const found = g.findSimilarConcept("yyy", unit(0.5, 1, 0));
     expect(found).toBeNull();
   });
+  it("does NOT merge when slugs differ by trailing number", () => {
+    const g = new Graph();
+    // "spiral-6" and "spiral-7" have near-identical embeddings but
+    // are structurally distinct (numbered sequence). The dedup guard
+    // must prevent the merge even though cosine > DEDUP_COSINE.
+    g.addConcept(mkConcept("spiral-6", unit(1, 0.01, 0)));
+    const found = g.findSimilarConcept("Spiral 7", unit(1, 0.02, 0));
+    expect(found).toBeNull();
+  });
+  it("still merges when slugs differ by non-numeric suffix", () => {
+    const g = new Graph();
+    g.addConcept(mkConcept("aaa", unit(1, 0.1, 0)));
+    // "bbb" ≠ "aaa" but no trailing-number difference → cosine merge OK
+    const found = g.findSimilarConcept("different slug", unit(1, 0.05, 0));
+    expect(found).not.toBeNull();
+  });
 });
 
 describe("Graph.nearestConcepts", () => {

@@ -21,6 +21,21 @@ export function cosine(a: Float32Array, b: Float32Array): number {
   return dot / (ra * rb);
 }
 
+/**
+ * Two slugs that share a prefix but differ only in a trailing numeric
+ * segment are distinct concepts by definition.
+ *   "spiral-6" vs "spiral-7" → true  (same prefix "spiral-", different number)
+ *   "v0-2" vs "v0-3"         → true
+ *   "walker" vs "walker-2"   → false (first has no trailing number)
+ *   "walker" vs "talker"     → false (different prefix)
+ */
+function differByTrailingNumber(a: string, b: string): boolean {
+  const pa = a.match(/^(.+?)(\d+)$/);
+  const pb = b.match(/^(.+?)(\d+)$/);
+  if (!pa || !pb) return false;
+  return pa[1] === pb[1] && pa[2] !== pb[2];
+}
+
 export interface GraphJSON {
   sources: Record<string, SourceJSON>;
   concepts: Record<string, ConceptJSON>;
@@ -91,7 +106,15 @@ export class Graph {
         best = c;
       }
     }
-    if (best && bestSim >= DEDUP_COSINE) return best;
+    if (best && bestSim >= DEDUP_COSINE) {
+      // Structural guard: if slugs share a prefix but differ by a
+      // trailing number, they are distinct concepts (Spiral 6 ≠ Spiral 7,
+      // Phase 1 ≠ Phase 2, v0.2 ≠ v0.3). Cosine similarity can't
+      // distinguish them because the embedding is dominated by the
+      // shared prefix, but the number IS the identity.
+      if (differByTrailingNumber(slug, best.id)) return null;
+      return best;
+    }
     return null;
   }
 
