@@ -96,9 +96,10 @@ export function buildProgram(): Command {
     .command("save")
     .description("Ingest the current session into the graph")
     .option("--tail <n>", "only ingest the last N turns", (v) => parseInt(v, 10))
+    .option("--force", "re-classify all turns (use after prompt version bump)")
     .option("--graph <path>", "path to v0.2 graph JSON")
     .option("--session <path>", "explicit session jsonl path (overrides auto-detect)")
-    .action(async (opts: { tail?: number; graph?: string; session?: string }) => {
+    .action(async (opts: { tail?: number; force?: boolean; graph?: string; session?: string }) => {
       loadEnv();
       const root = projectRoot();
       const graphPath = opts.graph ?? graphPathFor(root);
@@ -141,12 +142,16 @@ export function buildProgram(): Command {
         console.log(`initial graph: ${graph.concepts.size} concepts, ${graph.edges.size} edges`);
         console.log();
 
+        if (opts.force) {
+          console.log("--force: re-classifying all turns (prompt version bumped)");
+        }
         const stats = await ingestSession(graph, jsonl, {
           embedder,
           classifier,
           saveEvery: 25,
           saveTo: graphPath,
           tail: opts.tail ?? null,
+          force: opts.force ?? false,
           onProgress: (n, nc, ne, nl) => {
             console.log(`  [${n}] concepts=${nc} edges=${ne} llm=${nl}`);
           },

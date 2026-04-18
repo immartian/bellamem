@@ -3,7 +3,7 @@ import { dirname, join } from "node:path";
 import { createHash, randomBytes } from "node:crypto";
 import OpenAI from "openai";
 
-export const PROMPT_VERSION = "v2";
+export const PROMPT_VERSION = "v3";
 export const LLM_MODEL_DEFAULT = "gpt-4o-mini";
 export const EMBED_MODEL_DEFAULT = "text-embedding-3-small";
 
@@ -85,6 +85,10 @@ CONCEPT HYGIENE:
 - Topic phrases: noun-phrase form, concise, canonical, re-usable across sessions
 - Prefer merging near-variant topics — if "walker primitive" exists, don't create
   "walker abstraction", "walker protocol", "walker interface". Use the existing one.
+- EXCEPTION: numbered sequences are DISTINCT concepts. "Spiral 7" is NOT a variant
+  of "Spiral 6". "Phase 2" is NOT "Phase 1". "v0.3" is NOT "v0.2". Each numbered
+  item in a sequence tracks different work/state/decisions — always create a new
+  concept, never merge into the prior number.
 - Prefer zero creates over one create. Prefer one create over many.
 - When in doubt between walk and none, prefer none
 

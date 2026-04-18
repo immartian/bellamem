@@ -300,6 +300,14 @@ export interface IngestOptions {
   saveEvery?: number;
   saveTo?: string | null;
   tail?: number | null;
+  /**
+   * When true, re-classify turns even if already in graph.sources.
+   * Used after a PROMPT_VERSION bump to re-extract with the new prompt.
+   * Does NOT delete existing concepts/edges — only adds new ones from
+   * the fresh classification. Source records are already present so
+   * addSource is a no-op; applyClassification runs on the new result.
+   */
+  force?: boolean;
 }
 
 export async function ingestSession(
@@ -323,10 +331,13 @@ export async function ingestSession(
     elapsedS: 0,
   };
 
+  const force = opts.force ?? false;
   for (let i = 0; i < turns.length; i++) {
     const turn = turns[i]!;
     // Idempotent skip — re-runs only process new turns.
-    if (graph.sources.has(turn.id)) {
+    // When force=true, skip the check and re-classify everything
+    // (used after a PROMPT_VERSION bump).
+    if (!force && graph.sources.has(turn.id)) {
       stats.skippedAlreadyIngested++;
       processed.push(turn);
       continue;
