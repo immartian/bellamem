@@ -2,11 +2,31 @@ import { Graph } from "./graph.js";
 import { Concept } from "./schema.js";
 import { audit, redFlags } from "./audit.js";
 
-function byMass(concepts: Concept[]): Concept[] {
-  return [...concepts].sort((a, b) => {
-    if (a.mass !== b.mass) return b.mass - a.mass;
-    return b.sourceRefs.length - a.sourceRefs.length;
+// Recency half-life for the resume's "effective rank" score.
+// Mass is multiplied by exp(-age_days / HALF_LIFE_DAYS). A 14-day
+// half-life means a 30-day-old concept needs ~4× the mass to rank
+// equal to a concept touched today.
+const HALF_LIFE_DAYS = 14;
+const DAY_SECONDS = 86400;
+
+function effectiveRank(c: Concept, graph: Graph, nowTs: number): number {
+  const src = c.lastTouchedAt ? graph.sources.get(c.lastTouchedAt) : undefined;
+  const ts = src?.timestamp ?? null;
+  if (ts === null) return c.mass * 0.5; // untimed → penalize, but not zero
+  const ageDays = Math.max(0, (nowTs - ts) / DAY_SECONDS);
+  const decay = Math.exp(-ageDays / HALF_LIFE_DAYS);
+  return c.mass * decay;
+}
+
+function byEffectiveRank(concepts: Concept[], graph: Graph, nowTs: number): Concept[] {
+  const scored = concepts.map(c => [effectiveRank(c, graph, nowTs), c] as [number, Concept]);
+  scored.sort((a, b) => {
+    if (a[0] !== b[0]) return b[0] - a[0];
+    // Tie-break: raw mass, then source_refs count.
+    if (a[1].mass !== b[1].mass) return b[1].mass - a[1].mass;
+    return b[1].sourceRefs.length - a[1].sourceRefs.length;
   });
+  return scored.map(([, c]) => c);
 }
 
 function byLastTouched(concepts: Concept[]): Concept[] {
@@ -50,22 +70,29 @@ export function resumeText(graph: Graph, opts: ResumeOptions = {}): string {
   out.push("");
 
   const all = [...graph.concepts.values()];
+  const nowTs = Date.now() / 1000;
 
-  const invMeta = byMass(all.filter(c => c.class_ === "invariant" && c.nature === "metaphysical"));
+  const invMeta = byEffectiveRank(
+    all.filter(c => c.class_ === "invariant" && c.nature === "metaphysical"),
+    graph, nowTs);
   out.push(`## what the system IS — invariant × metaphysical (${invMeta.length})`);
   for (const c of invMeta.slice(0, topInvMeta)) {
     out.push(`  m=${c.mass.toFixed(2)} [${String(c.sourceRefs.length).padStart(2)}r] ${c.topic}`);
   }
   out.push("");
 
-  const invNorm = byMass(all.filter(c => c.class_ === "invariant" && c.nature === "normative"));
+  const invNorm = byEffectiveRank(
+    all.filter(c => c.class_ === "invariant" && c.nature === "normative"),
+    graph, nowTs);
   out.push(`## what we commit to — invariant × normative (${invNorm.length})`);
   for (const c of invNorm.slice(0, topInvNorm)) {
     out.push(`  m=${c.mass.toFixed(2)} [${String(c.sourceRefs.length).padStart(2)}r] ${c.topic}`);
   }
   out.push("");
 
-  const invFact = byMass(all.filter(c => c.class_ === "invariant" && c.nature === "factual"));
+  const invFact = byEffectiveRank(
+    all.filter(c => c.class_ === "invariant" && c.nature === "factual"),
+    graph, nowTs);
   out.push(`## structural facts — invariant × factual (${invFact.length})`);
   for (const c of invFact.slice(0, topInvFact)) {
     out.push(`  m=${c.mass.toFixed(2)} [${String(c.sourceRefs.length).padStart(2)}r] ${c.topic}`);

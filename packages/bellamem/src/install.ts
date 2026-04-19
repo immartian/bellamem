@@ -29,10 +29,27 @@ belief like *"the save failed with exit 144"* is a record of an event
 that already happened and has since been resolved — it is not evidence
 that the save is currently broken.
 
-**If \`$0\` is \`resume\` or empty**: Synthesize in under 300 words —
-(1) where we are from the replay tail, (2) what we've decided from
-the expand output, (3) what just mattered from surprises,
-(4) what's still open. Do not repeat the output verbatim; compose.
+**If \`$0\` is \`resume\` or empty**: Synthesize in under 300 words.
+Lead with what's been touched THIS session or in the last day —
+that's the active work the user needs to pick up. Mention long-term
+invariants and decisions only when they directly constrain the
+active work, or when 3-5 load-bearing ones give essential context.
+Do NOT enumerate every section; compress aggressively.
+
+Structure:
+(1) **Where we are.** One paragraph: the active thread the user is
+    mid-stream on. Use the TOP items from invariants/decisions/
+    ephemerals that were touched recently. If the recent work has a
+    clear focus (a specific Spiral, feature, bug), lead with that.
+(2) **What just mattered.** 2-3 sentences on the freshest disputes,
+    retractions, or high-delta mass moves. Skip if nothing recent.
+(3) **Still open.** 3-5 items, not 15. Pick what the user likely
+    picks up next, not the full ephemeral backlog.
+(4) **(optional) Load-bearing background.** 1-2 sentences max, only
+    if a stable invariant is directly in play for the active work.
+
+Do not repeat the output verbatim; compose. Resist bullet-point dump
+mode — the user wants a NARRATIVE of where they are.
 
 **If \`$0\` is \`save\`**: Report how many new beliefs were added vs merged
 by auto-emerge, whether the audit stayed clean (no new entropy
