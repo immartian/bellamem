@@ -191,6 +191,18 @@ export class Embedder {
     this.dirty = true;
     return Float32Array.from(v);
   }
+
+  /**
+   * Cache-only lookup: return the embedding if it's in the disk cache,
+   * otherwise null. Never hits the API. Used by read-side hot paths
+   * (walker) that would otherwise storm OpenAI with hundreds of
+   * sequential calls to hydrate topic embeddings on a cache miss.
+   */
+  embedCached(text: string): Float32Array | null {
+    const key = createHash("sha256").update(text).digest("hex");
+    const hit = this.cache[key];
+    return hit ? Float32Array.from(hit) : null;
+  }
 }
 
 // ---------------------------------------------------------------------------

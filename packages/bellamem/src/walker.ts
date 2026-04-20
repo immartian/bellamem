@@ -105,11 +105,15 @@ export async function askText(
       qEmb = null;
     }
     if (qEmb) {
+      // Hydrate concept embeddings FROM CACHE ONLY — never issue new
+      // API calls for the ~N topics in the graph. A cache miss means
+      // the concept falls back to substring scoring, which is fine.
+      // Without this guard, a graph with 1000 concepts on a cold cache
+      // would fire 1000 sequential OpenAI requests and hang for minutes.
       for (const c of graph.concepts.values()) {
         if (c.embedding) continue;
-        try {
-          c.embedding = await opts.embedder.embed(c.topic);
-        } catch { /* leave unhydrated */ }
+        const cached = opts.embedder.embedCached(c.topic);
+        if (cached) c.embedding = cached;
       }
     }
   }
