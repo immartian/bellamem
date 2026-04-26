@@ -13,9 +13,11 @@ and every mass value is the sigmoid of a sum of log-odds bumps, one
 per citation.** Retrieval is therefore grounded — we can always point
 at the exact turns that ratified a belief.
 
-Theory lives in `bella/`. Implementation spec for the current schema
-is `docs/rewrite/v0.2-spec.md` — language-independent, ~1200 lines,
-the contract every port must honor.
+Theory lives in a separate repository:
+[Recursive-Emergence/bella](https://github.com/Recursive-Emergence/bella).
+Implementation spec for the current schema is
+`docs/rewrite/v0.2-spec.md` — language-independent, ~1200 lines, the
+contract every port must honor.
 
 ---
 
@@ -51,7 +53,6 @@ packages/bellamem/            Node/TypeScript implementation (v0.3.0+)
     overview.html / graph.html / trace.html   UI shells
     static/{app.css, overview.js, graph.js, trace.js}   client code
 
-bella/                        BELLA theory (SPEC.md, VISION.md, …)
 docs/                         Plans, rewrite history, brand assets
   rewrite/
     v0.2-spec.md              Language-independent schema + ops contract

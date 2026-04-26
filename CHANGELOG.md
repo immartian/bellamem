@@ -4,6 +4,21 @@ All notable changes will be documented in this file. This project aims
 for [Semantic Versioning](https://semver.org). Until v1.0, everything
 is subject to change.
 
+## Unreleased — 2026-04-26 — Theory split out
+
+**Removed**
+- `bella/` subfolder — the BELLA formal theory (SPEC, VISION, MEMORY,
+  EXAMPLES) has moved to its own repository under the Recursive
+  Emergence org: https://github.com/Recursive-Emergence/bella. That
+  repo is now the canonical home for the theory framework and its
+  validation harness (`replay/`).
+
+**Changed**
+- README §Theory and ARCHITECTURE.md updated to point at the external
+  theory repo. Bellamem remains the empirical tool — local
+  accumulating memory for LLM coding agents — and references the
+  theory rather than embedding it.
+
 ## [0.3.1.2] — 2026-04-15 — Daemon replaces cron
 
 **Added**

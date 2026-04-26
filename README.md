@@ -620,12 +620,18 @@ Full layout and invariants: **[ARCHITECTURE.md](https://github.com/immartian/bel
 ## Theory
 
 The formal calculus — six rules, invariants, Bayesian grounding,
-domain-agnostic case studies — lives in **[`bella/`](bella/)**:
+domain-agnostic case studies — lives in its own repository under
+the Recursive Emergence org:
+**[Recursive-Emergence/bella](https://github.com/Recursive-Emergence/bella)**.
 
-- **[SPEC.md](bella/SPEC.md)** — the six rules, formal definitions
-- **[VISION.md](bella/VISION.md)** — theoretical grounding (Jaynes, Gödel, self-reference)
-- **[EXAMPLES.md](bella/EXAMPLES.md)** — case studies (H. pylori, continental drift, …)
-- **[MEMORY.md](bella/MEMORY.md)** — how BELLA maps to LLM agent memory
+- **[SPEC.md](https://github.com/Recursive-Emergence/bella/blob/main/SPEC.md)** — the six rules, formal definitions
+- **[VISION.md](https://github.com/Recursive-Emergence/bella/blob/main/VISION.md)** — theoretical grounding (Jaynes, Gödel, self-reference)
+- **[EXAMPLES.md](https://github.com/Recursive-Emergence/bella/blob/main/EXAMPLES.md)** — case studies (H. pylori, continental drift, …)
+- **[MEMORY.md](https://github.com/Recursive-Emergence/bella/blob/main/MEMORY.md)** — how BELLA maps to LLM agent memory
+- **[replay/](https://github.com/Recursive-Emergence/bella/tree/main/replay)** — historical-event validation harness (Wirecard, Theranos, Wakefield, Hydroxychloroquine)
+
+`bellamem` is the empirical tool that applies that calculus as
+persistent memory for LLM coding agents.
 
 The implementation spec — schema, R1 formula, classifier prompt
 (verbatim), cache keys, audit thresholds — is
@@ -654,7 +660,7 @@ Short version:
 
 **Built with [Claude Code](https://claude.com/claude-code).** Bella is
 primarily an AI-collaborative project. The
-[BELLA specification](bella/SPEC.md) and the
+[BELLA specification](https://github.com/Recursive-Emergence/bella/blob/main/SPEC.md) and the
 [Recursive Emergence framework](https://github.com/Recursive-Emergence/RE)
 are [Isaac Mao](https://github.com/immartian)'s independent research;
 the Python and TypeScript implementations are heavily co-written with
